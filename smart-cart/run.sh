@@ -21,4 +21,6 @@ mkdir -p "$DATA_DIR"
 python3 init_data.py
 
 echo "Starting Smart Cart..."
+# Get ingress path from HA
+export INGRESS_PATH=$(python3 -c "import json; d=json.load(open('/data/options.json')); print('')" 2>/dev/null || echo "")
 python3 main.py
