@@ -487,6 +487,8 @@ tr:hover .row-actions{opacity:1}
 </div>
 
 <script>
+// Auto-detect base path from current URL so API calls work under any HA ingress path
+const BASE = window.location.pathname.replace(/\/+$/, '') + '/';
 // ══════════════════════════════════════════════════════
 // State
 // ══════════════════════════════════════════════════════
