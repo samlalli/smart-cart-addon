@@ -501,11 +501,11 @@ async function init(){
   await Promise.all([loadList(),loadRecipes(),loadSettings(),loadAnalytics(),loadAldiList()]);
 }
 
-async function loadList(){const r=await fetch('/api/list');listData=await r.json();renderList()}
-async function loadRecipes(){const r=await fetch('/api/recipes');recipesData=await r.json();renderRecipes()}
-async function loadSettings(){const r=await fetch('/api/settings');settingsData=await r.json();applySettings()}
-async function loadAnalytics(){const r=await fetch('/api/analytics');analyticsData=await r.json();renderAnalytics()}
-async function loadAldiList(){const r=await fetch('/api/aldi-list');aldiData=await r.json();renderAldiBanner()}
+async function loadList(){const r=await fetch('api/list');listData=await r.json();renderList()}
+async function loadRecipes(){const r=await fetch('api/recipes');recipesData=await r.json();renderRecipes()}
+async function loadSettings(){const r=await fetch('api/settings');settingsData=await r.json();applySettings()}
+async function loadAnalytics(){const r=await fetch('api/analytics');analyticsData=await r.json();renderAnalytics()}
+async function loadAldiList(){const r=await fetch('api/aldi-list');aldiData=await r.json();renderAldiBanner()}
 
 // ══════════════════════════════════════════════════════
 // Tabs
@@ -660,7 +660,7 @@ async function saveItemModal(){
     if(idx>=0)listData.items[idx]={...listData.items[idx],...updated};
   } else {
     // Add new
-    const r=await fetch('/api/list/item',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await fetch('api/list/item',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const newItem=await r.json();
     listData.items.push(newItem);
   }
@@ -683,7 +683,7 @@ function renderCatsModal(){
 async function addCategory(){
   const val=document.getElementById('new-cat').value.trim();
   if(!val)return;
-  const r=await fetch('/api/settings/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:val})});
+  const r=await fetch('api/settings/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:val})});
   settingsData.categories=await r.json();
   document.getElementById('new-cat').value='';
   renderCatsModal();
@@ -808,7 +808,7 @@ async function submitRecipe(type){
   }
 
   try{
-    const r=await fetch('/api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await fetch('api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!r.ok){const e=await r.json();alert('Error: '+(e.error||'Failed'));return;}
     const recipe=await r.json();
     recipesData.recipes.push(recipe);
@@ -838,7 +838,7 @@ function openRecipeDetail(id){
     srcEl.innerHTML=`<div style="color:var(--text-muted);margin-bottom:4px">Source:</div><a href="${esc(recipe.source_url)}" target="_blank" style="color:var(--accent);font-size:12px;word-break:break-all">${esc(recipe.source_url)}</a>`;
   } else if(recipe.source_type==='image'){
     srcEl.style.display='block';
-    srcEl.innerHTML=`<div style="color:var(--text-muted);margin-bottom:6px">Source: Cookbook photo</div><img src="/api/recipes/${id}/image" style="max-width:100%;max-height:120px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'">`;
+    srcEl.innerHTML=`<div style="color:var(--text-muted);margin-bottom:6px">Source: Cookbook photo</div><img src="api/recipes/${id}/image" style="max-width:100%;max-height:120px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'">`;
   } else {
     srcEl.style.display='none';
   }
@@ -914,7 +914,7 @@ function applySettings(){
 
 async function saveSetting(key,value){
   settingsData[key]=value;
-  await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[key]:value})});
+  await fetch('api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[key]:value})});
 }
 
 // ══════════════════════════════════════════════════════
@@ -953,7 +953,7 @@ async function toggleAldiItem(id,cb){
 
 async function clearAldiList(){
   if(!confirm('Mark Aldi shopping as complete and clear the list?'))return;
-  await fetch('/api/aldi-list/clear',{method:'POST'});
+  await fetch('api/aldi-list/clear',{method:'POST'});
   aldiData={active:false,items:[]};
   renderAldiBanner();
   closeModal('modal-aldi');
@@ -982,7 +982,7 @@ async function runShop(){
 
   log('📋 Reading your list…');
   try{
-    const r=await fetch('/api/shop/prepare',{method:'POST'});
+    const r=await fetch('api/shop/prepare',{method:'POST'});
     const data=await r.json();
     shopState.items=data.items;
     log(`✓ ${data.item_count} items to shop`,'success');
@@ -1056,7 +1056,7 @@ async function fetchPrices(){
   document.getElementById('price-options').innerHTML='<div style="text-align:center;padding:28px;color:var(--text-muted)">🔍 Fetching prices from Coles, Woolworths & Aldi…<br><small>This may take a minute</small></div>';
   document.getElementById('choose-btn').disabled=true;
   try{
-    const r=await fetch('/api/shop/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
+    const r=await fetch('api/shop/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
     const data=await r.json();
     shopState.priceData=data;
     renderOptions(data.options);
@@ -1102,7 +1102,7 @@ async function proceedWithOption(){
   showStep('specials');
   document.getElementById('bulk-suggestions').innerHTML='<div style="color:var(--text-muted)">Checking for specials…</div>';
   try{
-    const r=await fetch('/api/shop/specials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
+    const r=await fetch('api/shop/specials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
     const data=await r.json();
     if(!data.suggestions?.length){
       document.getElementById('bulk-suggestions').innerHTML='<div style="color:var(--text-muted);font-style:italic;padding:12px">No bulk buy opportunities this week.</div>';
@@ -1131,7 +1131,7 @@ async function prepareCart(){
   showStep('cart');
   document.getElementById('cart-stores').innerHTML='<div style="color:var(--text-muted);padding:12px">Preparing your cart…</div>';
   try{
-    const r=await fetch('/api/shop/prepare-cart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({option:shopState.selectedOption})});
+    const r=await fetch('api/shop/prepare-cart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({option:shopState.selectedOption})});
     shopState.cartData=await r.json();
     renderCartStep(shopState.cartData);
     await loadAldiList();
@@ -1188,7 +1188,7 @@ function renderCartStep(cart){
 
 async function completeShop(){
   const cheapestSingle=Math.min(...(shopState.priceData?.options||[]).filter(o=>o.stores.length===1).map(o=>o.total).filter(Boolean));
-  await fetch('/api/shop/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+  await fetch('api/shop/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     option:shopState.selectedOption,
     items:shopState.items,
     item_count:shopState.items.length,
