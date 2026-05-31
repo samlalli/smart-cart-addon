@@ -14,7 +14,7 @@ except Exception as e:
     print(f"Warning: Anthropic SDK issue: {e}")
     SDK_AVAILABLE = False
 
-MODEL = "claude-sonnet-4-20250514"
+MODEL = "claude-sonnet-4-5"
 
 PANTRY_ITEMS = [
     "flour", "sugar", "salt", "pepper", "oil", "olive oil", "vegetable oil",
