@@ -1,0 +1,34 @@
+{
+  "name": "Smart Cart",
+  "version": "1.0.0",
+  "slug": "smart_cart",
+  "description": "AI-powered shopping assistant — compares Coles, Woolworths and Aldi, manages recipes and your shopping list.",
+  "url": "https://github.com/YOUR_GITHUB_USERNAME/smart-cart-addon",
+  "arch": ["aarch64", "amd64", "armv7"],
+  "startup": "application",
+  "boot": "auto",
+  "ports": {
+    "5000/tcp": 5000
+  },
+  "ports_description": {
+    "5000/tcp": "Smart Cart web interface"
+  },
+  "options": {
+    "claude_api_key": "",
+    "preferred_delivery_window": "morning",
+    "split_threshold": 10
+  },
+  "schema": {
+    "claude_api_key": "str",
+    "preferred_delivery_window": "list(morning|afternoon|evening|any)",
+    "split_threshold": "int"
+  },
+  "panel_icon": "mdi:cart",
+  "panel_title": "Smart Cart",
+  "ingress": true,
+  "ingress_port": 5000,
+  "homeassistant_api": false,
+  "hassio_api": false,
+  "map": ["data"],
+  "image": "ghcr.io/YOUR_GITHUB_USERNAME/smart-cart-addon/smart-cart"
+}
