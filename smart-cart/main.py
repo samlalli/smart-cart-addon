@@ -2,16 +2,15 @@ import os
 import json
 import uuid
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
-from werkzeug.middleware.proxy_fix import ProxyFix
+
+# HA Ingress passes the path prefix via environment variable INGRESS_PATH
+# e.g. /api/hassio_ingress/AbCdEfGh
+INGRESS_PATH = os.environ.get("INGRESS_PATH", "")
 
 app = Flask(__name__)
 CORS(app)
-
-# Handle HA ingress proxy — strips the ingress path prefix so our routes work
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -35,20 +34,35 @@ def save_json(filename, data):
         json.dump(data, f, indent=2)
 
 
+# ─── Helper to register routes with and without ingress prefix ───────────────
+
+def route(path, **kwargs):
+    """Register a route both with and without the ingress prefix."""
+    def decorator(f):
+        app.add_url_rule(path, f.__name__ + "_plain", f, **kwargs)
+        if INGRESS_PATH:
+            app.add_url_rule(INGRESS_PATH + path, f.__name__ + "_ingress", f, **kwargs)
+        return f
+    return decorator
+
+
 # ─── Pages ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
+@app.route(INGRESS_PATH + "/" if INGRESS_PATH else "/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", ingress_path=INGRESS_PATH)
 
 
 # ─── My List ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/list", methods=["GET"])
+@app.route((INGRESS_PATH + "/api/list") if INGRESS_PATH else "/api/list", methods=["GET"])
 def get_list():
     return jsonify(load_json("list.json"))
 
 @app.route("/api/list/item", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/list/item") if INGRESS_PATH else "/api/list/item", methods=["POST"])
 def add_item():
     data = load_json("list.json")
     item = request.json
@@ -69,6 +83,7 @@ def add_item():
     return jsonify(item)
 
 @app.route("/api/list/item/<item_id>", methods=["PUT"])
+@app.route((INGRESS_PATH + "/api/list/item/<item_id>") if INGRESS_PATH else "/api/list/item/<item_id>", methods=["PUT"])
 def update_item(item_id):
     data = load_json("list.json")
     for i, item in enumerate(data["items"]):
@@ -79,6 +94,7 @@ def update_item(item_id):
     return jsonify({"error": "Not found"}), 404
 
 @app.route("/api/list/item/<item_id>", methods=["DELETE"])
+@app.route((INGRESS_PATH + "/api/list/item/<item_id>") if INGRESS_PATH else "/api/list/item/<item_id>", methods=["DELETE"])
 def delete_item(item_id):
     data = load_json("list.json")
     data["items"] = [i for i in data["items"] if i["id"] != item_id]
@@ -86,6 +102,7 @@ def delete_item(item_id):
     return jsonify({"success": True})
 
 @app.route("/api/list/toggle/<item_id>", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/list/toggle/<item_id>") if INGRESS_PATH else "/api/list/toggle/<item_id>", methods=["POST"])
 def toggle_item(item_id):
     data = load_json("list.json")
     for item in data["items"]:
@@ -99,12 +116,13 @@ def toggle_item(item_id):
 # ─── Recipes ──────────────────────────────────────────────────────────────────
 
 @app.route("/api/recipes", methods=["GET"])
+@app.route((INGRESS_PATH + "/api/recipes") if INGRESS_PATH else "/api/recipes", methods=["GET"])
 def get_recipes():
     return jsonify(load_json("recipes.json"))
 
 @app.route("/api/recipes", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/recipes") if INGRESS_PATH else "/api/recipes", methods=["POST"])
 def add_recipe():
-    from claude_helper import extract_recipe_from_url, extract_recipe_from_image
     payload = request.json
     source_type = payload.get("source_type")
 
@@ -118,7 +136,7 @@ def add_recipe():
         "notes": "",
         "source_type": source_type,
         "source_url": payload.get("url", ""),
-        "source_image": None,  # Stored separately to avoid huge JSON
+        "source_image": None,
         "cook_count": 0,
         "last_cooked": None,
         "active_this_week": False,
@@ -142,10 +160,9 @@ def add_recipe():
 
     elif source_type == "image":
         from claude_helper import extract_recipe_from_image
+        import base64
         image_data = payload.get("image_data")
         media_type = payload.get("media_type", "image/jpeg")
-        # Save image thumbnail reference
-        recipe["source_image"] = f"data:{media_type};base64,{image_data[:100]}..."  # Preview only
         extracted = extract_recipe_from_image(image_data, media_type)
         if "error" not in extracted:
             recipe.update({
@@ -156,12 +173,9 @@ def add_recipe():
                 "ingredients": extracted.get("ingredients", []),
                 "notes": extracted.get("notes", ""),
             })
-            # Save full image to disk
-            import base64
             img_path = os.path.join(UPLOAD_FOLDER, f"{recipe['id']}.jpg")
             with open(img_path, "wb") as f:
                 f.write(base64.b64decode(image_data))
-            recipe["source_image_path"] = img_path
         else:
             return jsonify({"error": extracted["error"]}), 500
 
@@ -184,6 +198,7 @@ def add_recipe():
     return jsonify(recipe)
 
 @app.route("/api/recipes/<recipe_id>", methods=["PUT"])
+@app.route((INGRESS_PATH + "/api/recipes/<recipe_id>") if INGRESS_PATH else "/api/recipes/<recipe_id>", methods=["PUT"])
 def update_recipe(recipe_id):
     data = load_json("recipes.json")
     for i, r in enumerate(data["recipes"]):
@@ -194,10 +209,10 @@ def update_recipe(recipe_id):
     return jsonify({"error": "Not found"}), 404
 
 @app.route("/api/recipes/<recipe_id>", methods=["DELETE"])
+@app.route((INGRESS_PATH + "/api/recipes/<recipe_id>") if INGRESS_PATH else "/api/recipes/<recipe_id>", methods=["DELETE"])
 def delete_recipe(recipe_id):
     data = load_json("recipes.json")
     list_data = load_json("list.json")
-    # Remove recipe-only items from list
     list_data["items"] = [
         item for item in list_data["items"]
         if not (recipe_id in item.get("recipe_tags", []) and len(item.get("recipe_tags", [])) == 1 and item.get("sources") == ["recipe"])
@@ -211,6 +226,7 @@ def delete_recipe(recipe_id):
     return jsonify({"success": True})
 
 @app.route("/api/recipes/<recipe_id>/toggle", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/recipes/<recipe_id>/toggle") if INGRESS_PATH else "/api/recipes/<recipe_id>/toggle", methods=["POST"])
 def toggle_recipe(recipe_id):
     recipes_data = load_json("recipes.json")
     list_data = load_json("list.json")
@@ -269,6 +285,7 @@ def toggle_recipe(recipe_id):
     return jsonify({"recipe": recipe, "active": active})
 
 @app.route("/api/recipes/<recipe_id>/servings", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/recipes/<recipe_id>/servings") if INGRESS_PATH else "/api/recipes/<recipe_id>/servings", methods=["POST"])
 def update_servings(recipe_id):
     recipes_data = load_json("recipes.json")
     list_data = load_json("list.json")
@@ -299,10 +316,8 @@ def update_servings(recipe_id):
     return jsonify({"success": True, "servings": new_servings})
 
 @app.route("/api/recipes/<recipe_id>/image", methods=["GET"])
+@app.route((INGRESS_PATH + "/api/recipes/<recipe_id>/image") if INGRESS_PATH else "/api/recipes/<recipe_id>/image", methods=["GET"])
 def get_recipe_image(recipe_id):
-    """Serve recipe photo."""
-    import base64
-    from flask import send_file
     img_path = os.path.join(UPLOAD_FOLDER, f"{recipe_id}.jpg")
     if os.path.exists(img_path):
         return send_file(img_path, mimetype="image/jpeg")
@@ -312,10 +327,12 @@ def get_recipe_image(recipe_id):
 # ─── Settings ─────────────────────────────────────────────────────────────────
 
 @app.route("/api/settings", methods=["GET"])
+@app.route((INGRESS_PATH + "/api/settings") if INGRESS_PATH else "/api/settings", methods=["GET"])
 def get_settings():
     return jsonify(load_json("settings.json"))
 
 @app.route("/api/settings", methods=["PUT"])
+@app.route((INGRESS_PATH + "/api/settings") if INGRESS_PATH else "/api/settings", methods=["PUT"])
 def update_settings():
     data = load_json("settings.json")
     data.update(request.json)
@@ -323,48 +340,41 @@ def update_settings():
     return jsonify(data)
 
 @app.route("/api/settings/categories", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/settings/categories") if INGRESS_PATH else "/api/settings/categories", methods=["POST"])
 def add_category():
     data = load_json("settings.json")
     cat = request.json.get("category", "").strip()
     if cat and cat not in data.get("categories", []):
         data.setdefault("categories", []).append(cat)
         save_json("settings.json", data)
-    return jsonify(data["categories"])
+    return jsonify(data.get("categories", []))
 
 @app.route("/api/settings/categories/<cat>", methods=["DELETE"])
+@app.route((INGRESS_PATH + "/api/settings/categories/<cat>") if INGRESS_PATH else "/api/settings/categories/<cat>", methods=["DELETE"])
 def delete_category(cat):
     data = load_json("settings.json")
     data["categories"] = [c for c in data.get("categories", []) if c != cat]
     save_json("settings.json", data)
-    return jsonify(data["categories"])
+    return jsonify(data.get("categories", []))
 
 
 # ─── Analytics ────────────────────────────────────────────────────────────────
 
 @app.route("/api/analytics", methods=["GET"])
+@app.route((INGRESS_PATH + "/api/analytics") if INGRESS_PATH else "/api/analytics", methods=["GET"])
 def get_analytics():
     return jsonify(load_json("history.json"))
-
-@app.route("/api/analytics/shop", methods=["POST"])
-def record_shop():
-    history = load_json("history.json")
-    shop = request.json
-    shop["id"] = str(uuid.uuid4())
-    shop["date"] = datetime.now().isoformat()
-    history["shops"].append(shop)
-    history["total_spent"] = round(history.get("total_spent", 0) + shop.get("total", 0), 2)
-    history["total_saved"] = round(history.get("total_saved", 0) + shop.get("saved", 0), 2)
-    save_json("history.json", history)
-    return jsonify(shop)
 
 
 # ─── Aldi List ────────────────────────────────────────────────────────────────
 
 @app.route("/api/aldi-list", methods=["GET"])
+@app.route((INGRESS_PATH + "/api/aldi-list") if INGRESS_PATH else "/api/aldi-list", methods=["GET"])
 def get_aldi_list():
     return jsonify(load_json("aldi_list.json"))
 
 @app.route("/api/aldi-list", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/aldi-list") if INGRESS_PATH else "/api/aldi-list", methods=["POST"])
 def set_aldi_list():
     data = request.json
     data["created"] = datetime.now().isoformat()
@@ -373,6 +383,7 @@ def set_aldi_list():
     return jsonify(data)
 
 @app.route("/api/aldi-list/toggle/<item_id>", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/aldi-list/toggle/<item_id>") if INGRESS_PATH else "/api/aldi-list/toggle/<item_id>", methods=["POST"])
 def toggle_aldi_item(item_id):
     data = load_json("aldi_list.json")
     for item in data.get("items", []):
@@ -383,6 +394,7 @@ def toggle_aldi_item(item_id):
     return jsonify(data)
 
 @app.route("/api/aldi-list/clear", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/aldi-list/clear") if INGRESS_PATH else "/api/aldi-list/clear", methods=["POST"])
 def clear_aldi_list():
     data = {"active": False, "items": [], "created": None, "shop_option": None}
     save_json("aldi_list.json", data)
@@ -392,6 +404,7 @@ def clear_aldi_list():
 # ─── Shop ─────────────────────────────────────────────────────────────────────
 
 @app.route("/api/shop/prepare", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/shop/prepare") if INGRESS_PATH else "/api/shop/prepare", methods=["POST"])
 def prepare_shop():
     from compare import consolidate_items
     from claude_helper import check_pantry_items, generate_clarifications
@@ -410,6 +423,7 @@ def prepare_shop():
     })
 
 @app.route("/api/shop/prices", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/shop/prices") if INGRESS_PATH else "/api/shop/prices", methods=["POST"])
 def get_prices():
     from scraper import search_all_stores, get_delivery_fees
     from compare import calculate_options
@@ -429,6 +443,7 @@ def get_prices():
     return jsonify({"options": options, "priced_items": priced_items, "not_found": not_found})
 
 @app.route("/api/shop/specials", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/shop/specials") if INGRESS_PATH else "/api/shop/specials", methods=["POST"])
 def get_specials():
     from scraper import check_for_specials
     from claude_helper import suggest_bulk_buys
@@ -439,11 +454,8 @@ def get_specials():
     return jsonify({"specials": specials, "suggestions": suggestions})
 
 @app.route("/api/shop/prepare-cart", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/shop/prepare-cart") if INGRESS_PATH else "/api/shop/prepare-cart", methods=["POST"])
 def prepare_cart():
-    """
-    Prepare cart links and lists for Coles/Woolworths (options B+C).
-    Returns deep links (C) and formatted reference lists (B) for each store.
-    """
     from scraper import build_woolworths_cart_url, build_coles_cart_url, format_store_list
     payload = request.json
     option = payload.get("option", {})
@@ -457,7 +469,6 @@ def prepare_cart():
             "list": format_store_list(items, "woolworths"),
             "item_count": len(items)
         }
-
     if "coles" in split and split["coles"]:
         items = split["coles"]
         result["coles"] = {
@@ -465,7 +476,6 @@ def prepare_cart():
             "list": format_store_list(items, "coles"),
             "item_count": len(items)
         }
-
     if "aldi" in split and split["aldi"]:
         items = split["aldi"]
         aldi_items = [{
@@ -477,21 +487,18 @@ def prepare_cart():
             "price": (i.get("aldi") or {}).get("price"),
             "checked": False
         } for i in items]
-        # Save Aldi list persistently
         save_json("aldi_list.json", {
             "active": True,
             "items": aldi_items,
             "created": datetime.now().isoformat(),
             "shop_option": option.get("label", "")
         })
-        result["aldi"] = {
-            "items": aldi_items,
-            "item_count": len(aldi_items)
-        }
+        result["aldi"] = {"items": aldi_items, "item_count": len(aldi_items)}
 
     return jsonify(result)
 
 @app.route("/api/shop/complete", methods=["POST"])
+@app.route((INGRESS_PATH + "/api/shop/complete") if INGRESS_PATH else "/api/shop/complete", methods=["POST"])
 def complete_shop():
     payload = request.json
     option = payload.get("option", {})
@@ -520,7 +527,6 @@ def complete_shop():
     history["total_saved"] = round(history.get("total_saved", 0) + saved + rewards_saved, 2)
     save_json("history.json", history)
 
-    # Update purchase counts
     list_data = load_json("list.json")
     purchased_ids = {i["id"] for i in payload.get("items", [])}
     for item in list_data["items"]:
@@ -529,14 +535,12 @@ def complete_shop():
             item["last_purchased"] = today
     save_json("list.json", list_data)
 
-    # Update Rewards Plus
     if option.get("rewards_plus_applied"):
         settings["rewards_plus_last_used"] = today
         settings["rewards_plus_active"] = False
         settings["rewards_plus_code"] = ""
         save_json("settings.json", settings)
 
-    # Update recipe cook counts, reset for next week
     recipes_data = load_json("recipes.json")
     for recipe in recipes_data["recipes"]:
         if recipe.get("active_this_week"):
@@ -554,4 +558,5 @@ def complete_shop():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     print(f"\n🛒 Smart Cart running on port {port}")
+    print(f"   Ingress path: '{INGRESS_PATH}' (empty = direct access)")
     app.run(host="0.0.0.0", port=port, debug=False)
