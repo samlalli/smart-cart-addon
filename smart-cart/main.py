@@ -4,9 +4,14 @@ import uuid
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 CORS(app)
+
+# Handle HA ingress proxy — strips the ingress path prefix so our routes work
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(__file__), "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -548,11 +553,5 @@ def complete_shop():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    # Handle HA ingress base path
-    ingress_path = os.environ.get("INGRESS_PATH", "")
-    if ingress_path:
-        app.config["APPLICATION_ROOT"] = ingress_path
-        from werkzeug.middleware.proxy_fix import ProxyFix
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
     print(f"\n🛒 Smart Cart running on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
