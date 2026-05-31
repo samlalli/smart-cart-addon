@@ -14,7 +14,7 @@ AI-powered shopping assistant for Home Assistant. Compares prices across Coles, 
 
 1. In Home Assistant go to **Settings → Add-ons → Add-on Store**
 2. Click the **⋮ menu** (top right) → **Repositories**
-3. Add: `https://github.com/YOUR_GITHUB_USERNAME/smart-cart-addon`
+3. Add: `https://github.com/samlalli/smart-cart-addon`
 4. Find **Smart Cart** in the store and click **Install**
 5. In the add-on configuration, enter your **Claude API key** (from console.anthropic.com)
 6. Click **Start**
