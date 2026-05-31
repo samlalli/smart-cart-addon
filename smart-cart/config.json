@@ -30,5 +30,5 @@
   "homeassistant_api": false,
   "hassio_api": false,
   "map": ["data"],
-  "image": "ghcr.io/YOUR_GITHUB_USERNAME/smart-cart-addon/smart-cart"
+  "image": "ghcr.io/samlalli/smart-cart-addon/smart-cart"
 }
