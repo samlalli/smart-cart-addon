@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Smart Cart</title>
+<meta name="base-path" content="{{ ingress_path }}/">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0f0f0f;--surface:#1a1a1a;--surface2:#222;--surface3:#2a2a2a;--border:#2e2e2e;--text:#f0ede8;--text-muted:#888;--text-dim:#444;--accent:#c8f060;--accent-dim:#8aaa30;--w:#1b9e3e;--c:#e2231a;--a:#1159a8;--gold:#f0c060;--danger:#e05555;--r:10px;--rs:6px}
@@ -501,11 +502,11 @@ async function init(){
   await Promise.all([loadList(),loadRecipes(),loadSettings(),loadAnalytics(),loadAldiList()]);
 }
 
-async function loadList(){const r=await fetch('api/list');listData=await r.json();renderList()}
-async function loadRecipes(){const r=await fetch('api/recipes');recipesData=await r.json();renderRecipes()}
-async function loadSettings(){const r=await fetch('api/settings');settingsData=await r.json();applySettings()}
-async function loadAnalytics(){const r=await fetch('api/analytics');analyticsData=await r.json();renderAnalytics()}
-async function loadAldiList(){const r=await fetch('api/aldi-list');aldiData=await r.json();renderAldiBanner()}
+async function loadList(){const r=await fetch(BASE+'api/list');listData=await r.json();renderList()}
+async function loadRecipes(){const r=await fetch(BASE+'api/recipes');recipesData=await r.json();renderRecipes()}
+async function loadSettings(){const r=await fetch(BASE+'api/settings');settingsData=await r.json();applySettings()}
+async function loadAnalytics(){const r=await fetch(BASE+'api/analytics');analyticsData=await r.json();renderAnalytics()}
+async function loadAldiList(){const r=await fetch(BASE+'api/aldi-list');aldiData=await r.json();renderAldiBanner()}
 
 // ══════════════════════════════════════════════════════
 // Tabs
@@ -579,7 +580,7 @@ function sortList(key){
 }
 
 async function toggleItem(id,cb){
-  await fetch(`/api/list/toggle/${id}`,{method:'POST'});
+  await fetch(BASE+`api/list/toggle/${id}`,{method:'POST'});
   const item=listData.items.find(i=>i.id===id);
   if(item)item.included=cb.checked;
   renderList();
@@ -589,13 +590,13 @@ async function updateItem(id,field,value){
   const item=listData.items.find(i=>i.id===id);
   if(!item)return;
   item[field]=value;
-  await fetch(`/api/list/item/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[field]:value})});
+  await fetch(BASE+`api/list/item/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[field]:value})});
 }
 
 async function deleteItem(id){
   if(!confirm('Remove this item?'))return;
   listData.items=listData.items.filter(i=>i.id!==id);
-  await fetch(`/api/list/item/${id}`,{method:'DELETE'});
+  await fetch(BASE+`api/list/item/${id}`,{method:'DELETE'});
   renderList();
 }
 
@@ -654,13 +655,13 @@ async function saveItemModal(){
   };
   if(id){
     // Edit existing
-    const r=await fetch(`/api/list/item/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await fetch(BASE+`api/list/item/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const updated=await r.json();
     const idx=listData.items.findIndex(i=>i.id===id);
     if(idx>=0)listData.items[idx]={...listData.items[idx],...updated};
   } else {
     // Add new
-    const r=await fetch('api/list/item',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await fetch(BASE+'api/list/item',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const newItem=await r.json();
     listData.items.push(newItem);
   }
@@ -683,7 +684,7 @@ function renderCatsModal(){
 async function addCategory(){
   const val=document.getElementById('new-cat').value.trim();
   if(!val)return;
-  const r=await fetch('api/settings/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:val})});
+  const r=await fetch(BASE+'api/settings/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:val})});
   settingsData.categories=await r.json();
   document.getElementById('new-cat').value='';
   renderCatsModal();
@@ -691,7 +692,7 @@ async function addCategory(){
 }
 
 async function removeCategory(cat){
-  const r=await fetch(`/api/settings/categories/${encodeURIComponent(cat)}`,{method:'DELETE'});
+  const r=await fetch(BASE+`api/settings/categories/${encodeURIComponent(cat)}`,{method:'DELETE'});
   settingsData.categories=await r.json();
   renderCatsModal();
   renderModalCatChips();
@@ -732,7 +733,7 @@ function renderRecipes(){
 }
 
 async function toggleRecipe(id,cb){
-  const r=await fetch(`/api/recipes/${id}/toggle`,{method:'POST'});
+  const r=await fetch(BASE+`api/recipes/${id}/toggle`,{method:'POST'});
   const result=await r.json();
   const recipe=recipesData.recipes.find(r=>r.id===id);
   if(recipe)recipe.active_this_week=result.active;
@@ -744,7 +745,7 @@ async function adjustRecipeServings(id,delta){
   const recipe=recipesData.recipes.find(r=>r.id===id);
   if(!recipe)return;
   const ns=Math.max(1,(recipe.this_week_servings||recipe.base_servings)+delta);
-  await fetch(`/api/recipes/${id}/servings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({servings:ns})});
+  await fetch(BASE+`api/recipes/${id}/servings`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({servings:ns})});
   recipe.this_week_servings=ns;
   const el=document.getElementById('sw-'+id);
   if(el)el.textContent=ns;
@@ -808,7 +809,7 @@ async function submitRecipe(type){
   }
 
   try{
-    const r=await fetch('api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const r=await fetch(BASE+'api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!r.ok){const e=await r.json();alert('Error: '+(e.error||'Failed'));return;}
     const recipe=await r.json();
     recipesData.recipes.push(recipe);
@@ -865,14 +866,14 @@ async function updateIng(recipeId,idx,field,value){
   const recipe=recipesData.recipes.find(r=>r.id===recipeId);
   if(!recipe||!recipe.ingredients[idx])return;
   recipe.ingredients[idx][field]=value;
-  await fetch(`/api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:recipe.ingredients})});
+  await fetch(BASE+`api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:recipe.ingredients})});
 }
 
 async function removeIng(recipeId,idx){
   const recipe=recipesData.recipes.find(r=>r.id===recipeId);
   if(!recipe)return;
   recipe.ingredients.splice(idx,1);
-  await fetch(`/api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:recipe.ingredients})});
+  await fetch(BASE+`api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:recipe.ingredients})});
   renderDetailIngredients(recipe);
 }
 
@@ -892,7 +893,7 @@ function adjustServings(delta){
 async function deleteRecipe(){
   const id=shopState.currentRecipeId;
   if(!id||!confirm('Delete this recipe?'))return;
-  await fetch(`/api/recipes/${id}`,{method:'DELETE'});
+  await fetch(BASE+`api/recipes/${id}`,{method:'DELETE'});
   recipesData.recipes=recipesData.recipes.filter(r=>r.id!==id);
   closeModal('modal-recipe-detail');
   renderRecipes();
@@ -914,7 +915,7 @@ function applySettings(){
 
 async function saveSetting(key,value){
   settingsData[key]=value;
-  await fetch('api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[key]:value})});
+  await fetch(BASE+'api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[key]:value})});
 }
 
 // ══════════════════════════════════════════════════════
@@ -943,7 +944,7 @@ function openAldiList(){
 }
 
 async function toggleAldiItem(id,cb){
-  const r=await fetch(`/api/aldi-list/toggle/${id}`,{method:'POST'});
+  const r=await fetch(BASE+`api/aldi-list/toggle/${id}`,{method:'POST'});
   aldiData=await r.json();
   renderAldiBanner();
   // Update modal if open
@@ -953,7 +954,7 @@ async function toggleAldiItem(id,cb){
 
 async function clearAldiList(){
   if(!confirm('Mark Aldi shopping as complete and clear the list?'))return;
-  await fetch('api/aldi-list/clear',{method:'POST'});
+  await fetch(BASE+'api/aldi-list/clear',{method:'POST'});
   aldiData={active:false,items:[]};
   renderAldiBanner();
   closeModal('modal-aldi');
@@ -982,7 +983,7 @@ async function runShop(){
 
   log('📋 Reading your list…');
   try{
-    const r=await fetch('api/shop/prepare',{method:'POST'});
+    const r=await fetch(BASE+'api/shop/prepare',{method:'POST'});
     const data=await r.json();
     shopState.items=data.items;
     log(`✓ ${data.item_count} items to shop`,'success');
@@ -1046,7 +1047,7 @@ async function answerClarify(itemId,answer,field,btn){
   shopState.clarificationAnswers[itemId]=answer;
   btn.closest('.clarification-card').querySelectorAll('.clarification-opt').forEach(b=>b.classList.remove('selected'));
   if(btn.classList.contains('clarification-opt'))btn.classList.add('selected');
-  await fetch(`/api/list/item/${itemId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[field]:answer})});
+  await fetch(BASE+`api/list/item/${itemId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[field]:answer})});
   const item=shopState.items.find(i=>i.id===itemId);
   if(item)item[field]=answer;
 }
@@ -1056,7 +1057,7 @@ async function fetchPrices(){
   document.getElementById('price-options').innerHTML='<div style="text-align:center;padding:28px;color:var(--text-muted)">🔍 Fetching prices from Coles, Woolworths & Aldi…<br><small>This may take a minute</small></div>';
   document.getElementById('choose-btn').disabled=true;
   try{
-    const r=await fetch('api/shop/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
+    const r=await fetch(BASE+'api/shop/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
     const data=await r.json();
     shopState.priceData=data;
     renderOptions(data.options);
@@ -1102,7 +1103,7 @@ async function proceedWithOption(){
   showStep('specials');
   document.getElementById('bulk-suggestions').innerHTML='<div style="color:var(--text-muted)">Checking for specials…</div>';
   try{
-    const r=await fetch('api/shop/specials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
+    const r=await fetch(BASE+'api/shop/specials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
     const data=await r.json();
     if(!data.suggestions?.length){
       document.getElementById('bulk-suggestions').innerHTML='<div style="color:var(--text-muted);font-style:italic;padding:12px">No bulk buy opportunities this week.</div>';
@@ -1131,7 +1132,7 @@ async function prepareCart(){
   showStep('cart');
   document.getElementById('cart-stores').innerHTML='<div style="color:var(--text-muted);padding:12px">Preparing your cart…</div>';
   try{
-    const r=await fetch('api/shop/prepare-cart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({option:shopState.selectedOption})});
+    const r=await fetch(BASE+'api/shop/prepare-cart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({option:shopState.selectedOption})});
     shopState.cartData=await r.json();
     renderCartStep(shopState.cartData);
     await loadAldiList();
@@ -1188,7 +1189,7 @@ function renderCartStep(cart){
 
 async function completeShop(){
   const cheapestSingle=Math.min(...(shopState.priceData?.options||[]).filter(o=>o.stores.length===1).map(o=>o.total).filter(Boolean));
-  await fetch('api/shop/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+  await fetch(BASE+'api/shop/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     option:shopState.selectedOption,
     items:shopState.items,
     item_count:shopState.items.length,
