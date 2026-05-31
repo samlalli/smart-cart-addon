@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "slug": "smart_cart",
   "description": "AI-powered shopping assistant — compares Coles, Woolworths and Aldi, manages recipes and your shopping list.",
-  "url": "https://github.com/YOUR_GITHUB_USERNAME/smart-cart-addon",
+  "url": "https://github.com/samlalli/smart-cart-addon",
   "arch": ["aarch64", "amd64", "armv7"],
   "startup": "application",
   "boot": "auto",
