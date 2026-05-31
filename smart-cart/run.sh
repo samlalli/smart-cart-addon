@@ -1,5 +1,7 @@
 #!/bin/sh
 
+echo "=== Smart Cart Starting ==="
+
 # Read configuration from HA options
 CONFIG_PATH=/data/options.json
 
@@ -7,23 +9,25 @@ if [ -f "$CONFIG_PATH" ]; then
     CLAUDE_API_KEY=$(python3 -c "import json; d=json.load(open('$CONFIG_PATH')); print(d.get('claude_api_key',''))")
     DELIVERY_WINDOW=$(python3 -c "import json; d=json.load(open('$CONFIG_PATH')); print(d.get('preferred_delivery_window','morning'))")
     SPLIT_THRESHOLD=$(python3 -c "import json; d=json.load(open('$CONFIG_PATH')); print(d.get('split_threshold',10))")
-
     export ANTHROPIC_API_KEY="$CLAUDE_API_KEY"
     export DELIVERY_WINDOW="$DELIVERY_WINDOW"
     export SPLIT_THRESHOLD="$SPLIT_THRESHOLD"
+    echo "Config loaded from $CONFIG_PATH"
+else
+    echo "No options.json found, using defaults"
 fi
 
-# Get HA ingress path if available
-if [ -f /data/options.json ]; then
-    export INGRESS_PATH=$(python3 -c "import os; print(os.environ.get('INGRESS_PATH',''))" 2>/dev/null || echo "")
-fi
+# HA Supervisor sets INGRESS_PATH automatically
+# Print it so we can see it in logs
+echo "INGRESS_PATH: ${INGRESS_PATH:-not set}"
 
-# Use /data for persistent storage (survives add-on updates)
+# Use /data for persistent storage
 export DATA_DIR="/data/smart-cart"
 mkdir -p "$DATA_DIR"
+echo "Data directory: $DATA_DIR"
 
-# Initialise data files if they don't exist
+# Initialise data files
 python3 init_data.py
 
-echo "Starting Smart Cart..."
+echo "Starting Flask server..."
 python3 main.py
