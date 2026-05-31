@@ -548,5 +548,11 @@ def complete_shop():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    # Handle HA ingress base path
+    ingress_path = os.environ.get("INGRESS_PATH", "")
+    if ingress_path:
+        app.config["APPLICATION_ROOT"] = ingress_path
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_prefix=1)
     print(f"\n🛒 Smart Cart running on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
