@@ -13,6 +13,11 @@ if [ -f "$CONFIG_PATH" ]; then
     export SPLIT_THRESHOLD="$SPLIT_THRESHOLD"
 fi
 
+# Get HA ingress path if available
+if [ -f /data/options.json ]; then
+    export INGRESS_PATH=$(python3 -c "import os; print(os.environ.get('INGRESS_PATH',''))" 2>/dev/null || echo "")
+fi
+
 # Use /data for persistent storage (survives add-on updates)
 export DATA_DIR="/data/smart-cart"
 mkdir -p "$DATA_DIR"
@@ -21,6 +26,4 @@ mkdir -p "$DATA_DIR"
 python3 init_data.py
 
 echo "Starting Smart Cart..."
-# Get ingress path from HA
-export INGRESS_PATH=$(python3 -c "import json; d=json.load(open('/data/options.json')); print('')" 2>/dev/null || echo "")
 python3 main.py
