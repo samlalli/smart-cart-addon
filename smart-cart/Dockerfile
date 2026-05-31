@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.12
+ARG BUILD_FROM=ghcr.io/homeassistant/aarch64-base-python:3.12
 FROM $BUILD_FROM
 
 # Install dependencies
