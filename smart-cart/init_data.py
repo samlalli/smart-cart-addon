@@ -1,9 +1,5 @@
-"""
-init_data.py — Creates default data files if they don't exist.
-Runs on every startup but only writes files that are missing.
-"""
-import os
-import json
+"""init_data.py — Creates default data files on first run."""
+import os, json
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data/smart-cart")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -13,9 +9,9 @@ DEFAULTS = {
     "recipes.json": {"recipes": []},
     "history.json": {"shops": [], "total_saved": 0, "total_spent": 0},
     "aldi_list.json": {"active": False, "items": [], "created": None, "shop_option": None},
+    "price_history.json": {},
     "settings.json": {
-        "split_threshold": int(os.environ.get("SPLIT_THRESHOLD", 10)),
-        "preferred_delivery_window": os.environ.get("DELIVERY_WINDOW", "morning"),
+        "preferred_delivery_window": "morning",
         "everyday_rewards": False,
         "flybuys": False,
         "woolworths_delivery_sub": False,
@@ -23,7 +19,21 @@ DEFAULTS = {
         "rewards_plus_active": False,
         "rewards_plus_code": "",
         "rewards_plus_last_used": None,
-        "categories": ["Fruit & Veg", "Fridge", "Freezer", "Meat", "Deli", "Bakery", "Cupboard", "Drinks", "Snacks", "Cleaning", "Personal Care"]
+        "include_woolworths": True,
+        "include_coles": True,
+        "include_aldi": True,
+        "woolworths_store_id": "",
+        "woolworths_store_name": "",
+        "coles_store_id": "",
+        "coles_store_name": "",
+        "aldi_store_name": "",
+        "theme": "dark",
+        "font_size": "medium",
+        "categories": [
+            "Fruit & Veg", "Meat", "Seafood", "Deli", "Dairy & Eggs",
+            "Bakery", "Frozen", "Canned & Packaged", "Drinks", "Snacks",
+            "Condiments & Sauces", "Baking", "Cleaning", "Personal Care", "Cupboard"
+        ]
     }
 }
 
@@ -33,19 +43,17 @@ for filename, default in DEFAULTS.items():
         with open(path, "w") as f:
             json.dump(default, f, indent=2)
         print(f"Created {filename}")
-    else:
-        # Migrate settings — add any missing keys
-        if filename == "settings.json":
-            with open(path) as f:
-                existing = json.load(f)
-            updated = False
-            for key, val in default.items():
-                if key not in existing:
-                    existing[key] = val
-                    updated = True
-            if updated:
-                with open(path, "w") as f:
-                    json.dump(existing, f, indent=2)
-                print(f"Migrated {filename}")
+    elif filename == "settings.json":
+        with open(path) as f:
+            existing = json.load(f)
+        updated = False
+        for key, val in default.items():
+            if key not in existing:
+                existing[key] = val
+                updated = True
+        if updated:
+            with open(path, "w") as f:
+                json.dump(existing, f, indent=2)
+            print(f"Migrated {filename}")
 
 print("Data initialisation complete.")
