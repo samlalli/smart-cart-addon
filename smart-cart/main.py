@@ -202,6 +202,7 @@ def add_recipe():
         ing.setdefault("id", str(uuid.uuid4()))
 
     data = load_json("recipes.json")
+    data.setdefault("recipes", [])
     data["recipes"].append(recipe)
     save_json("recipes.json", data)
     return jsonify(recipe)
