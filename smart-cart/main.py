@@ -267,7 +267,7 @@ def delete_recipe(recipe_id):
 
 @r("/api/recipes/<recipe_id>/toggle", methods=["POST"])
 def toggle_recipe(recipe_id):
-    from claude_helper import units_compatible, convert_units
+    from claude_helper import units_compatible
     recipes_data = load_json("recipes.json")
     list_data = load_json("list.json")
     recipe = next((rec for rec in recipes_data["recipes"] if rec["id"] == recipe_id), None)
@@ -276,48 +276,28 @@ def toggle_recipe(recipe_id):
 
     active = not recipe.get("active_this_week", False)
     recipe["active_this_week"] = active
+    ratio = recipe.get("this_week_servings", recipe["base_servings"]) / max(recipe["base_servings"], 1)
 
     if active:
-        ratio = recipe.get("this_week_servings", recipe["base_servings"]) / max(recipe["base_servings"], 1)
         for ing in recipe["ingredients"]:
             if ing.get("is_pantry") or ing.get("is_small_qty"):
                 continue
             scaled = round(float(ing.get("qty", 1)) * ratio, 2)
             ing_unit = (ing.get("unit") or "").lower().strip()
 
-            # Check for existing item
+            # Find an existing list item with the same name AND compatible unit
             existing = next((item for item in list_data["items"]
-                             if item["item"].lower() == ing["item"].lower()), None)
+                             if item["item"].lower() == ing["item"].lower()
+                             and (item.get("unit") or "").lower().strip() == ing_unit), None)
 
             if existing:
-                ex_unit = (existing.get("unit") or "").lower().strip()
-                if units_compatible(ex_unit, ing_unit) and ex_unit == ing_unit:
-                    # Same unit — merge
-                    existing["qty"] = round(float(existing.get("qty", 1)) + scaled, 2)
-                else:
-                    # Different/incompatible units — new entry
-                    list_data["items"].append({
-                        "id": str(uuid.uuid4()),
-                        "item": ing["item"],
-                        "qty": scaled,
-                        "unit": ing_unit,
-                        "details": ing.get("details", ""),
-                        "category": ing.get("category", ""),
-                        "notes": "",
-                        "included": True,
-                        "is_cupboard": False,
-                        "is_pantry": False,
-                        "sources": ["recipe"],
-                        "recipe_tags": [recipe_id],
-                        "purchase_count": 0,
-                        "last_purchased": None
-                    })
-                    existing = None
-
-                if existing:
-                    if recipe_id not in existing.get("recipe_tags", []):
-                        existing.setdefault("recipe_tags", []).append(recipe_id)
-                    existing["included"] = True
+                # Record this recipe's contribution, then recompute qty as sum of all contributions
+                existing.setdefault("recipe_quantities", {})
+                existing["recipe_quantities"][recipe_id] = scaled
+                if recipe_id not in existing.get("recipe_tags", []):
+                    existing.setdefault("recipe_tags", []).append(recipe_id)
+                existing["qty"] = _recompute_qty(existing)
+                existing["included"] = True
             else:
                 list_data["items"].append({
                     "id": str(uuid.uuid4()),
@@ -332,16 +312,28 @@ def toggle_recipe(recipe_id):
                     "is_pantry": False,
                     "sources": ["recipe"],
                     "recipe_tags": [recipe_id],
+                    "recipe_quantities": {recipe_id: scaled},
+                    "manual_qty": 0,
                     "purchase_count": 0,
                     "last_purchased": None
                 })
     else:
-        # Untick items from this recipe rather than removing
+        # Toggle OFF — remove this recipe's contribution
         for item in list_data["items"]:
-            if recipe_id in item.get("recipe_tags", []):
-                item["recipe_tags"].remove(recipe_id)
-                if not item.get("recipe_tags") and item.get("sources") == ["recipe"]:
-                    item["included"] = False
+            if recipe_id not in item.get("recipe_tags", []):
+                continue
+            item["recipe_tags"].remove(recipe_id)
+            if "recipe_quantities" in item:
+                item["recipe_quantities"].pop(recipe_id, None)
+            remaining_recipes = item.get("recipe_tags", [])
+            has_manual = "manual" in item.get("sources", []) or item.get("manual_qty", 0) > 0
+            if remaining_recipes or has_manual:
+                # Still needed by another recipe or manually — keep ticked, reduce qty
+                item["qty"] = _recompute_qty(item)
+                item["included"] = True
+            else:
+                # Only this recipe needed it — untick, keep in list
+                item["included"] = False
 
     for i, rec in enumerate(recipes_data["recipes"]):
         if rec["id"] == recipe_id:
@@ -350,6 +342,14 @@ def toggle_recipe(recipe_id):
     save_json("recipes.json", recipes_data)
     save_json("list.json", list_data)
     return jsonify({"recipe": recipe, "active": active})
+
+
+def _recompute_qty(item):
+    """Total qty = sum of all active recipe contributions + any manual base qty."""
+    contributions = sum(float(v) for v in (item.get("recipe_quantities") or {}).values())
+    manual = float(item.get("manual_qty", 0) or 0)
+    total = round(contributions + manual, 2)
+    return total if total > 0 else round(float(item.get("qty", 1)), 2)
 
 @r("/api/recipes/<recipe_id>/servings", methods=["POST"])
 def update_servings(recipe_id):
@@ -360,18 +360,20 @@ def update_servings(recipe_id):
     if not recipe:
         return jsonify({"error": "Not found"}), 404
 
-    old_ratio = recipe.get("this_week_servings", recipe["base_servings"]) / max(recipe["base_servings"], 1)
     new_ratio = new_servings / max(recipe["base_servings"], 1)
     recipe["this_week_servings"] = new_servings
 
     if recipe.get("active_this_week"):
         for item in list_data["items"]:
-            if recipe_id in item.get("recipe_tags", []):
-                ing = next((i for i in recipe["ingredients"] if i["item"].lower() == item["item"].lower()), None)
-                if ing:
-                    old_c = round(float(ing.get("qty", 1)) * old_ratio, 2)
-                    new_c = round(float(ing.get("qty", 1)) * new_ratio, 2)
-                    item["qty"] = round(max(0, float(item.get("qty", 1)) - old_c + new_c), 2)
+            if recipe_id not in item.get("recipe_tags", []):
+                continue
+            ing = next((i for i in recipe["ingredients"]
+                        if i["item"].lower() == item["item"].lower()
+                        and (i.get("unit") or "").lower().strip() == (item.get("unit") or "").lower().strip()), None)
+            if ing:
+                new_c = round(float(ing.get("qty", 1)) * new_ratio, 2)
+                item.setdefault("recipe_quantities", {})[recipe_id] = new_c
+                item["qty"] = _recompute_qty(item)
 
     for i, rec in enumerate(recipes_data["recipes"]):
         if rec["id"] == recipe_id:
@@ -504,18 +506,13 @@ def clear_aldi_list():
 @r("/api/shop/prepare", methods=["POST"])
 def prepare_shop():
     from compare import consolidate_items
-    from claude_helper import check_pantry_items, generate_clarifications
     list_data = load_json("list.json")
-    history = load_json("history.json")
     active_items = [i for i in list_data["items"] if i.get("included", True)]
     consolidated = consolidate_items(active_items)
-    recipe_pantry = [i for i in consolidated if (i.get("is_pantry") or i.get("is_small_qty")) and "recipe" in i.get("sources", [])]
-    pantry_questions = check_pantry_items(recipe_pantry, history.get("shops", []))
-    clarifications = generate_clarifications(consolidated, history.get("shops", []))
+    # No pantry step: every included list item is bought. Clarification happens
+    # AFTER the price search, grounded in real product candidates.
     return jsonify({
         "items": consolidated,
-        "pantry_questions": pantry_questions,
-        "clarifications": clarifications,
         "item_count": len(consolidated)
     })
 
@@ -529,6 +526,8 @@ def get_prices():
     priced_items = []
     not_found = []
     manual_needed = []
+    clarifications = []
+
     for item in items:
         prices = search_all_stores(item, settings)
         priced_item = {**item,
@@ -536,17 +535,79 @@ def get_prices():
                        "coles": prices.get("coles"),
                        "aldi": prices.get("aldi")}
         priced_items.append(priced_item)
-        if not any([prices.get("woolworths"), prices.get("coles"), prices.get("aldi")]):
+
+        found_any = any([prices.get("woolworths"), prices.get("coles"), prices.get("aldi")])
+        if not found_any:
             not_found.append(item["item"])
             manual_needed.append({"id": item.get("id"), "item": item["item"]})
+            continue
+
+        # Ambiguity detection: if any store returned multiple genuine alternatives
+        # that differ meaningfully in product/price, surface for user confirmation.
+        all_alts = []
+        for store in ["woolworths", "coles", "aldi"]:
+            sd = prices.get(store)
+            if sd and sd.get("alternatives") and len(sd["alternatives"]) > 1:
+                for alt in sd["alternatives"]:
+                    all_alts.append({**alt, "store": store})
+        if len(all_alts) > 1:
+            # De-dup by product name; only clarify if >1 distinct product
+            distinct = {a["name"]: a for a in all_alts}
+            if len(distinct) > 1:
+                clarifications.append({
+                    "item_id": item.get("id"),
+                    "item_name": item.get("item"),
+                    "options": sorted(distinct.values(), key=lambda x: x["total"])[:6]
+                })
+
     delivery_fees = get_delivery_fees(settings)
     options = calculate_options(priced_items, delivery_fees, settings)
     return jsonify({
         "options": options,
         "priced_items": priced_items,
         "not_found": not_found,
-        "manual_needed": manual_needed
+        "manual_needed": manual_needed,
+        "clarifications": clarifications
     })
+
+@r("/api/shop/select-product", methods=["POST"])
+def select_product():
+    """Lock in a user-chosen product for an ambiguous item, recompute that item's pricing."""
+    from scraper import calc_packs_needed
+    payload = request.json
+    chosen = payload.get("chosen", {})        # {name, unit_price, store, ...}
+    item = payload.get("item", {})            # the priced item to update
+    store = chosen.get("store")
+    if not store:
+        return jsonify({"error": "No store specified"}), 400
+    pack = calc_packs_needed(item.get("qty", 1), item.get("unit", ""), chosen.get("name", ""))
+    unit_price = float(chosen.get("unit_price", 0))
+    updated = {
+        "name": chosen.get("name", ""),
+        "price": unit_price,
+        "unit_price": unit_price,
+        "packs": pack["packs"],
+        "pack_label": pack["pack_label"],
+        "pack_note": pack["note"],
+        "line_total": round(unit_price * pack["packs"], 2),
+        "url": chosen.get("url", ""),
+        "on_special": chosen.get("on_special", False),
+        "store": store,
+        "user_selected": True
+    }
+    return jsonify({"store": store, "data": updated})
+
+@r("/api/shop/prices/recompute", methods=["POST"])
+def recompute_prices():
+    """Recompute options after user has confirmed product choices for ambiguous items."""
+    from scraper import get_delivery_fees
+    from compare import calculate_options
+    payload = request.json
+    priced_items = payload.get("priced_items", [])
+    settings = load_json("settings.json")
+    delivery_fees = get_delivery_fees(settings)
+    options = calculate_options(priced_items, delivery_fees, settings)
+    return jsonify({"options": options, "priced_items": priced_items})
 
 @r("/api/shop/prices/manual", methods=["POST"])
 def set_manual_price():
@@ -593,16 +654,25 @@ def prepare_cart():
         }
     if "aldi" in split and split["aldi"]:
         items = split["aldi"]
-        aldi_items = [{
-            "id": str(uuid.uuid4()),
-            "item": i.get("item", ""),
-            "qty": i.get("qty", 1),
-            "unit": i.get("unit", ""),
-            "details": i.get("details", ""),
-            "category": i.get("category", ""),
-            "price": (i.get("aldi") or {}).get("price"),
-            "checked": False
-        } for i in items]
+        aldi_items = []
+        for i in items:
+            ad = i.get("aldi") or {}
+            aldi_items.append({
+                "id": str(uuid.uuid4()),
+                "item": i.get("item", ""),
+                "matched_name": ad.get("name", ""),
+                "buy_qty": ad.get("pack_note") or (f"{ad.get('packs', 1)} × {ad.get('pack_label', '')}" if ad.get("pack_label") else str(ad.get("packs", 1))),
+                "packs": ad.get("packs", 1),
+                "pack_label": ad.get("pack_label", ""),
+                "qty": i.get("qty", 1),
+                "unit": i.get("unit", ""),
+                "details": i.get("details", ""),
+                "category": i.get("category", ""),
+                "unit_price": ad.get("unit_price", ad.get("price")),
+                "price": ad.get("line_total", ad.get("price")),
+                "on_special": ad.get("on_special", False),
+                "checked": False
+            })
         save_json("aldi_list.json", {
             "active": True,
             "items": aldi_items,
