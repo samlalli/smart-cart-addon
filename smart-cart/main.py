@@ -16,13 +16,29 @@ UPLOAD_FOLDER = os.path.join(DATA_DIR, "uploads")
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
+DEFAULT_STRUCTURES = {
+    "list.json": {"items": []},
+    "recipes.json": {"recipes": []},
+    "history.json": {"shops": [], "total_saved": 0, "total_spent": 0},
+    "aldi_list.json": {"active": False, "items": [], "created": None, "shop_option": None},
+    "price_history.json": {},
+    "settings.json": {},
+}
+
 def load_json(filename):
     path = os.path.join(DATA_DIR, filename)
+    default = DEFAULT_STRUCTURES.get(filename, {})
     try:
         with open(path) as f:
-            return json.load(f)
+            data = json.load(f)
+        # Guard: ensure expected top-level keys exist (handles empty/legacy files)
+        if isinstance(data, dict) and isinstance(default, dict):
+            for key, val in default.items():
+                data.setdefault(key, val if not isinstance(val, (list, dict)) else type(val)())
+        return data
     except Exception:
-        return {}
+        # Return a fresh copy of the default structure
+        return json.loads(json.dumps(default))
 
 def save_json(filename, data):
     path = os.path.join(DATA_DIR, filename)
@@ -202,7 +218,6 @@ def add_recipe():
         ing.setdefault("id", str(uuid.uuid4()))
 
     data = load_json("recipes.json")
-    data.setdefault("recipes", [])
     data["recipes"].append(recipe)
     save_json("recipes.json", data)
     return jsonify(recipe)
