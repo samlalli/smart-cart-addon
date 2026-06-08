@@ -1,6 +1,6 @@
 {
   "name": "Smart Cart",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "slug": "smart_cart",
   "description": "AI-powered shopping assistant — compares Coles, Woolworths and Aldi, manages recipes and your shopping list.",
   "url": "https://github.com/samlalli/smart-cart-addon",
@@ -27,5 +27,6 @@
   "ingress_port": 5000,
   "homeassistant_api": false,
   "hassio_api": false,
+  "host_network": true,
   "map": ["data"]
 }
