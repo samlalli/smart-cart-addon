@@ -71,7 +71,19 @@ tr{cursor:pointer}
 .qty-control{display:flex;align-items:center;gap:3px}
 .qty-btn{width:22px;height:22px;border-radius:4px;border:1px solid var(--border);background:var(--surface3);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
 .qty-btn:hover{background:var(--accent);color:#111;border-color:var(--accent)}
-.qty-input{width:62px;text-align:center;padding:3px 5px;font-size:14px;font-weight:500}
+.qty-input{width:68px;text-align:center;padding:3px 4px;font-size:12px;font-weight:500}
+.dropdown-wrap{position:relative;display:inline-block}
+.dropdown-menu{display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--surface);border:1px solid var(--border);border-radius:var(--rs);box-shadow:0 4px 20px rgba(0,0,0,.3);z-index:60;min-width:150px;overflow:hidden}
+.dropdown-menu.open{display:block}
+.dropdown-item{padding:9px 13px;cursor:pointer;font-size:13px;white-space:nowrap}
+.dropdown-item:hover{background:var(--surface3)}
+.confirm-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);max-width:380px;width:100%;padding:20px}
+.confirm-msg{font-size:14px;margin-bottom:18px;line-height:1.5}
+.confirm-actions{display:flex;gap:8px;justify-content:flex-end}
+.product-option{display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--rs);cursor:pointer;background:var(--surface2);font-size:13px}
+.product-option:hover{border-color:var(--accent)}
+.product-link{color:var(--accent);font-size:11px;text-decoration:none;white-space:nowrap}
+.product-link:hover{text-decoration:underline}
 .row-actions{display:flex;gap:3px;opacity:0;transition:opacity .15s}
 tr:hover .row-actions{opacity:1}
 .icon-btn{width:24px;height:24px;border-radius:4px;border:none;background:none;color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px}
@@ -235,9 +247,14 @@ tr:hover .row-actions{opacity:1}
     <button class="btn btn-secondary btn-sm" onclick="toggleGroupByCategory()" id="group-btn">Group by Cat</button>
     <button class="btn btn-primary" onclick="openItemModal()">+ Add Item</button>
     <div style="display:flex;gap:5px">
-      <button class="btn btn-secondary btn-sm" onclick="triggerExcelExport()">📊 Excel</button>
-      <button class="btn btn-secondary btn-sm" onclick="triggerPdfExport()">📄 PDF</button>
-      <button class="btn btn-secondary btn-sm" onclick="triggerTextExport()">📋 Copy</button>
+      <div class="dropdown-wrap">
+        <button class="btn btn-secondary btn-sm" onclick="toggleDropdown('export-menu',event)">⬇ Export ▾</button>
+        <div class="dropdown-menu" id="export-menu">
+          <div class="dropdown-item" onclick="triggerExcelExport();closeDropdowns()">📊 Excel (.xlsx)</div>
+          <div class="dropdown-item" onclick="triggerPdfExport();closeDropdowns()">📄 PDF</div>
+          <div class="dropdown-item" onclick="triggerTextExport();closeDropdowns()">📋 Copy as text</div>
+        </div>
+      </div>
       <button class="btn btn-danger btn-sm" onclick="deleteAllItems()">🗑 Delete All</button>
     </div>
   </div>
@@ -367,47 +384,15 @@ tr:hover .row-actions{opacity:1}
 
   <div id="shop-flow" style="display:none">
 
-    <!-- Pantry -->
-    <div id="step-pantry" style="display:none">
-      <div class="step-indicator">
-        <div class="step active">1. Pantry</div><div class="step-div">›</div>
-        <div class="step">2. Clarify</div><div class="step-div">›</div>
-        <div class="step">3. Prices</div><div class="step-div">›</div>
-        <div class="step">4. Specials</div><div class="step-div">›</div>
-        <div class="step">5. Cart</div>
-      </div>
-      <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">These pantry items come from your recipes — do you need to buy them?</p>
-      <div id="pantry-questions"></div>
-      <button class="btn btn-primary" onclick="goStep('clarify')">Continue →</button>
-    </div>
-
-    <!-- Clarify -->
-    <div id="step-clarify" style="display:none">
-      <div class="step-indicator">
-        <div class="step done">1. Pantry</div><div class="step-div">›</div>
-        <div class="step active">2. Clarify</div><div class="step-div">›</div>
-        <div class="step">3. Prices</div><div class="step-div">›</div>
-        <div class="step">4. Specials</div><div class="step-div">›</div>
-        <div class="step">5. Cart</div>
-      </div>
-      <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">A few things to confirm:</p>
-      <div id="clarification-list"></div>
-      <div style="display:flex;gap:8px;margin-top:4px">
-        <button class="btn btn-secondary" onclick="goStep('pantry')">← Back</button>
-        <button class="btn btn-primary" onclick="fetchPrices()">Get Prices →</button>
-      </div>
-    </div>
-
     <!-- Prices -->
     <div id="step-prices" style="display:none">
       <div class="step-indicator">
-        <div class="step done">1. Pantry</div><div class="step-div">›</div>
-        <div class="step done">2. Clarify</div><div class="step-div">›</div>
-        <div class="step active">3. Prices</div><div class="step-div">›</div>
-        <div class="step">4. Specials</div><div class="step-div">›</div>
-        <div class="step">5. Cart</div>
+        <div class="step active">1. Prices</div><div class="step-div">›</div>
+        <div class="step">2. Confirm</div><div class="step-div">›</div>
+        <div class="step">3. Specials</div><div class="step-div">›</div>
+        <div class="step">4. Cart</div>
       </div>
-      <div id="manual-price-section" style="display:none" class="card" style="border-color:var(--gold)">
+      <div id="manual-price-section" style="display:none" class="card">
         <div style="color:var(--gold);font-weight:500;margin-bottom:8px">⚠️ Items not found — enter manual prices</div>
         <div id="manual-price-inputs"></div>
         <button class="btn btn-sm btn-primary" onclick="applyManualPrices()" style="margin-top:8px">Apply Prices</button>
@@ -415,25 +400,39 @@ tr:hover .row-actions{opacity:1}
       <div id="not-found-warn" style="display:none" class="card"><div style="color:var(--gold);font-weight:500;margin-bottom:5px">⚠️ Items not found at any store</div><div id="not-found-list" style="font-size:12px;color:var(--text-muted)"></div></div>
       <div id="price-options" class="options-grid"></div>
       <div style="display:flex;gap:8px;margin-top:4px">
-        <button class="btn btn-secondary" onclick="goStep('clarify')">← Back</button>
-        <button class="btn btn-primary" id="choose-btn" onclick="proceedWithOption()" disabled>Continue with Selected →</button>
+        <button class="btn btn-primary" id="choose-btn" onclick="afterPrices()" disabled>Continue with Selected →</button>
+      </div>
+    </div>
+
+    <!-- Clarify (now AFTER prices — grounded in real product candidates) -->
+    <div id="step-clarify" style="display:none">
+      <div class="step-indicator">
+        <div class="step done">1. Prices</div><div class="step-div">›</div>
+        <div class="step active">2. Confirm</div><div class="step-div">›</div>
+        <div class="step">3. Specials</div><div class="step-div">›</div>
+        <div class="step">4. Cart</div>
+      </div>
+      <p style="color:var(--text-muted);font-size:13px;margin-bottom:12px">We found a few options for these items — confirm which you'd like:</p>
+      <div id="clarification-list"></div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn btn-secondary" onclick="goStep('prices')">← Back</button>
+        <button class="btn btn-primary" onclick="proceedWithOption()">Continue →</button>
       </div>
     </div>
 
     <!-- Specials -->
     <div id="step-specials" style="display:none">
       <div class="step-indicator">
-        <div class="step done">1. Pantry</div><div class="step-div">›</div>
-        <div class="step done">2. Clarify</div><div class="step-div">›</div>
-        <div class="step done">3. Prices</div><div class="step-div">›</div>
-        <div class="step active">4. Specials</div><div class="step-div">›</div>
-        <div class="step">5. Cart</div>
+        <div class="step done">1. Prices</div><div class="step-div">›</div>
+        <div class="step done">2. Confirm</div><div class="step-div">›</div>
+        <div class="step active">3. Specials</div><div class="step-div">›</div>
+        <div class="step">4. Cart</div>
       </div>
       <h3 style="margin-bottom:3px">Bulk Buy Suggestions</h3>
       <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px">Approve or skip:</p>
       <div id="bulk-suggestions"></div>
       <div style="display:flex;gap:8px;margin-top:4px">
-        <button class="btn btn-secondary" onclick="goStep('prices')">← Back</button>
+        <button class="btn btn-secondary" onclick="goStep('clarify')">← Back</button>
         <button class="btn btn-primary" onclick="prepareCart()">Prepare Cart →</button>
       </div>
     </div>
@@ -441,11 +440,10 @@ tr:hover .row-actions{opacity:1}
     <!-- Cart -->
     <div id="step-cart" style="display:none">
       <div class="step-indicator">
-        <div class="step done">1. Pantry</div><div class="step-div">›</div>
-        <div class="step done">2. Clarify</div><div class="step-div">›</div>
-        <div class="step done">3. Prices</div><div class="step-div">›</div>
-        <div class="step done">4. Specials</div><div class="step-div">›</div>
-        <div class="step active">5. Cart</div>
+        <div class="step done">1. Prices</div><div class="step-div">›</div>
+        <div class="step done">2. Confirm</div><div class="step-div">›</div>
+        <div class="step done">3. Specials</div><div class="step-div">›</div>
+        <div class="step active">4. Cart</div>
       </div>
       <!-- In-store list output -->
       <div id="instore-lists"></div>
@@ -656,6 +654,17 @@ tr:hover .row-actions{opacity:1}
   </div>
 </div>
 
+<!-- Confirm Modal -->
+<div id="modal-confirm" class="modal-overlay" style="display:none">
+  <div class="confirm-box">
+    <div class="confirm-msg" id="confirm-msg">Are you sure?</div>
+    <div class="confirm-actions">
+      <button class="btn btn-secondary" onclick="resolveConfirm(false)">Cancel</button>
+      <button class="btn btn-danger" id="confirm-ok-btn" onclick="resolveConfirm(true)">Delete</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ════════════════════════════════════════════════════════════
 // Base path & State
@@ -705,7 +714,7 @@ let currentSort={key:'purchase_count',dir:-1};
 let recipeSort={key:'recent',dir:-1};
 let recipeView='tile';
 let groupByCategory=false;
-let shopState={items:[],pantryAnswers:{},clarificationAnswers:{},priceData:null,selectedOption:null,cartData:null,currentRecipeId:null,currentStep:'pantry'};
+let shopState={items:[],clarifications:[],productChoices:{},priceData:null,selectedOption:null,cartData:null,currentRecipeId:null,currentStep:'prices'};
 let imgBase64=null;
 
 // ════════════════════════════════════════════════════════════
@@ -916,7 +925,7 @@ function updateSortIndicators(){
 
 async function deleteAllItems(){
   if(!(listData.items||[]).length){alert('The list is already empty.');return}
-  if(!confirm(`Delete ALL ${listData.items.length} items from the list? This cannot be undone.`))return;
+  if(!await confirmDialog(`Delete ALL ${listData.items.length} items from the list? This cannot be undone.`,'Delete All'))return;
   try{
     for(const item of [...listData.items]){
       await apiFetch(`api/list/item/${item.id}`,{method:'DELETE'});
@@ -941,7 +950,7 @@ async function updateItem(id,field,value){
 }
 
 async function deleteItem(id){
-  if(!confirm('Remove this item?'))return;
+  if(!await confirmDialog('Remove this item?','Remove'))return;
   listData.items=listData.items.filter(i=>i.id!==id);
   await fetch(BASE+`api/list/item/${id}`,{method:'DELETE'});
   renderList();
@@ -1249,7 +1258,7 @@ function renderRecipesList(){
 
 async function quickDeleteRecipe(id){
   const rec=recipesData.recipes.find(r=>r.id===id);
-  if(!rec||!confirm(`Delete "${rec.name}"?`))return;
+  if(!rec||!await confirmDialog(`Delete "${rec.name}"?`))return;
   try{
     await apiFetch(`api/recipes/${id}`,{method:'DELETE'});
     recipesData.recipes=recipesData.recipes.filter(r=>r.id!==id);
@@ -1259,7 +1268,7 @@ async function quickDeleteRecipe(id){
 
 async function deleteAllRecipes(){
   if(!(recipesData.recipes||[]).length){alert('There are no recipes to delete.');return}
-  if(!confirm(`Delete ALL ${recipesData.recipes.length} recipes? This cannot be undone.`))return;
+  if(!await confirmDialog(`Delete ALL ${recipesData.recipes.length} recipes? This cannot be undone.`,'Delete All'))return;
   try{
     for(const rec of [...recipesData.recipes]){
       await apiFetch(`api/recipes/${rec.id}`,{method:'DELETE'});
@@ -1470,7 +1479,7 @@ function adjustServings(delta){
 
 async function deleteRecipe(){
   const id=shopState.currentRecipeId;
-  if(!id||!confirm('Delete this recipe?'))return;
+  if(!id||!await confirmDialog('Delete this recipe?'))return;
   await fetch(BASE+`api/recipes/${id}`,{method:'DELETE'});
   recipesData.recipes=recipesData.recipes.filter(r=>r.id!==id);
   closeModal('modal-recipe-detail');renderRecipes();await loadList();
@@ -1552,7 +1561,7 @@ async function toggleAldiItem(id,cb){
 }
 
 async function clearAldiList(){
-  if(!confirm('Mark Aldi shopping as complete and clear the list?'))return;
+  if(!await confirmDialog('Mark Aldi shopping as complete and clear the list?','Clear'))return;
   await fetch(BASE+'api/aldi-list/clear',{method:'POST'});
   aldiData={active:false,items:[]};renderAldiBanner();closeModal('modal-aldi');
 }
@@ -1566,7 +1575,7 @@ function log(msg,type=''){
 }
 
 function showStep(step){
-  ['pantry','clarify','prices','specials','cart'].forEach(s=>document.getElementById('step-'+s).style.display=s===step?'block':'none');
+  ['clarify','prices','specials','cart'].forEach(s=>document.getElementById('step-'+s).style.display=s===step?'block':'none');
   shopState.currentStep=step;
 }
 
@@ -1578,53 +1587,13 @@ async function runShop(){
   document.getElementById('shop-flow').style.display='block';showStep('');
   log('📋 Reading your list…');
   try{
-    const r=await fetch(BASE+'api/shop/prepare',{method:'POST'});
-    const data=await r.json();
+    const data=await apiFetch('api/shop/prepare',{method:'POST'});
     shopState.items=data.items;
     log(`✓ ${data.item_count} items`,'success');
-    if(data.pantry_questions?.length){log(`⚠️ ${data.pantry_questions.length} pantry items to check`,'info');renderPantryQ(data.pantry_questions);showStep('pantry')}
-    else if(data.clarifications?.length){log(`❓ ${data.clarifications.length} clarifications`,'info');renderClarifications(data.clarifications);showStep('clarify')}
-    else await fetchPrices();
-  }catch(e){log('✗ '+e.message,'error')}
+    // Straight to price search — no pantry step, clarification happens after
+    await fetchPrices();
+  }catch(e){log('✗ '+e.message,'error');handleApiError(e)}
   btn.disabled=false;btn.textContent='🛒 Run Smart Shop';
-}
-
-function renderPantryQ(questions){
-  document.getElementById('pantry-questions').innerHTML=questions.map(q=>`
-    <div class="pantry-card">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:9px">
-        <div><div style="font-weight:500">${esc(q.item)}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px">${esc(q.reason)}</div></div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-sm btn-secondary" onclick="answerPantry('${q.item}',false,this)">✓ Have it</button>
-          <button class="btn btn-sm btn-primary" onclick="answerPantry('${q.item}',true,this)">+ Buy it</button>
-        </div>
-      </div>
-    </div>`).join('');
-}
-
-function answerPantry(item,buy,btn){
-  shopState.pantryAnswers[item]=buy;
-  const card=btn.closest('.pantry-card');card.style.opacity='0.5';card.querySelectorAll('button').forEach(b=>b.disabled=true);
-  if(!buy)shopState.items=shopState.items.filter(i=>i.item.toLowerCase()!==item.toLowerCase());
-}
-
-function renderClarifications(clarifications){
-  document.getElementById('clarification-list').innerHTML=clarifications.map(c=>`
-    <div class="clarification-card">
-      <div class="clarification-q">❓ ${esc(c.question)}</div>
-      <div class="clarification-options">
-        ${(c.options||[]).map(opt=>`<button class="clarification-opt" onclick="answerClarify('${c.item_id}','${esc(opt)}','${c.field_to_update}',this)">${esc(opt)}</button>`).join('')}
-        <input type="text" placeholder="Other…" style="padding:4px 9px;font-size:12px;min-width:90px" onkeydown="if(event.key==='Enter')answerClarify('${c.item_id}',this.value,'${c.field_to_update}',this)">
-      </div>
-    </div>`).join('');
-}
-
-async function answerClarify(itemId,answer,field,btn){
-  shopState.clarificationAnswers[itemId]=answer;
-  btn.closest('.clarification-card').querySelectorAll('.clarification-opt').forEach(b=>b.classList.remove('selected'));
-  if(btn.classList.contains('clarification-opt'))btn.classList.add('selected');
-  await fetch(BASE+`api/list/item/${itemId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({[field]:answer})});
-  const item=shopState.items.find(i=>i.id===itemId);if(item)item[field]=answer;
 }
 
 async function fetchPrices(){
@@ -1632,9 +1601,9 @@ async function fetchPrices(){
   document.getElementById('price-options').innerHTML='<div style="text-align:center;padding:26px;color:var(--text-muted)">🔍 Fetching prices from Coles, Woolworths & Aldi…<br><small>This may take a moment</small></div>';
   document.getElementById('choose-btn').disabled=true;
   try{
-    const r=await fetch(BASE+'api/shop/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
-    const data=await r.json();
+    const data=await apiFetch('api/shop/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
     shopState.priceData=data;
+    shopState.clarifications=data.clarifications||[];
     renderOptions(data.options);
     if(data.not_found?.length){
       document.getElementById('not-found-warn').style.display='block';
@@ -1644,8 +1613,68 @@ async function fetchPrices(){
       renderManualPriceInputs(data.manual_needed);
     }
   }catch(e){
-    document.getElementById('price-options').innerHTML=`<div class="card" style="color:var(--danger)">Error: ${e.message}</div>`;
+    document.getElementById('price-options').innerHTML=`<div class="card" style="color:var(--danger)">${esc(e.message)}</div>`;
+    handleApiError(e);
   }
+}
+
+// After selecting a price option: if ambiguous items exist, go to confirm step; else straight to specials
+function afterPrices(){
+  if(!shopState.selectedOption)return;
+  if(shopState.clarifications && shopState.clarifications.length){
+    renderClarifications(shopState.clarifications);
+    showStep('clarify');
+  } else {
+    proceedWithOption();
+  }
+}
+
+function renderClarifications(clarifications){
+  document.getElementById('clarification-list').innerHTML=clarifications.map((c,ci)=>`
+    <div class="clarification-card" data-item-id="${esc(c.item_id)}">
+      <div class="clarification-q">${esc(c.item_name)} — which product?</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${(c.options||[]).map((opt,oi)=>`
+          <label class="product-option" onclick="selectProductOption(${ci},${oi})">
+            <input type="radio" name="clarify-${ci}" ${oi===0?'checked':''} style="accent-color:var(--accent)">
+            <span style="flex:1">${esc(opt.name)}</span>
+            <span style="color:var(--text-muted);font-size:12px">${opt.packs}× ${esc(opt.pack_label||'')} </span>
+            <span style="font-weight:600;color:var(--accent)">${formatPrice(opt.total)}</span>
+            <span class="badge badge-${opt.store}" style="font-size:10px">${opt.store.charAt(0).toUpperCase()}</span>
+          </label>`).join('')}
+      </div>
+    </div>`).join('');
+  // Pre-select the cheapest (first) option for each
+  shopState.productChoices={};
+  clarifications.forEach((c,ci)=>{shopState.productChoices[c.item_id]=c.options[0]});
+}
+
+function selectProductOption(ci,oi){
+  const c=shopState.clarifications[ci];
+  if(!c)return;
+  shopState.productChoices[c.item_id]=c.options[oi];
+}
+
+async function applyProductChoices(){
+  // Apply each user-confirmed product back into the priced items + selected option split
+  for(const c of (shopState.clarifications||[])){
+    const chosen=shopState.productChoices[c.item_id];
+    if(!chosen)continue;
+    const item=(shopState.priceData.priced_items||[]).find(i=>i.id===c.item_id);
+    if(!item)continue;
+    try{
+      const res=await apiFetch('api/shop/select-product',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chosen,item})});
+      item[res.store]=res.data;
+    }catch(e){handleApiError(e)}
+  }
+  // Recompute options with the confirmed selections
+  try{
+    const data=await apiFetch('api/shop/prices/recompute',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({priced_items:shopState.priceData.priced_items})});
+    shopState.priceData.options=data.options;
+    // Re-pick the same option id the user chose, refreshed
+    const prevId=shopState.selectedOption?.id;
+    shopState.selectedOption=data.options.find(o=>o.id===prevId)||data.options[0];
+  }catch(e){handleApiError(e)}
 }
 
 function renderManualPriceInputs(items){
@@ -1758,11 +1787,14 @@ function selectOption(idx){
 
 async function proceedWithOption(){
   if(!shopState.selectedOption)return;
+  // If the user confirmed product choices on the clarify step, apply them now
+  if(shopState.clarifications && shopState.clarifications.length && shopState.productChoices){
+    await applyProductChoices();
+  }
   showStep('specials');
   document.getElementById('bulk-suggestions').innerHTML='<div style="color:var(--text-muted)">Checking for specials…</div>';
   try{
-    const r=await fetch(BASE+'api/shop/specials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
-    const data=await r.json();
+    const data=await apiFetch('api/shop/specials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:shopState.items})});
     if(!data.suggestions?.length){
       document.getElementById('bulk-suggestions').innerHTML='<div style="color:var(--text-muted);font-style:italic;padding:10px">No bulk buy opportunities this week.</div>';
     } else {
@@ -1811,23 +1843,17 @@ function renderCartStep(cart){
     let grandTotal=0;
 
     const rows=sorted.map(item=>{
-      // Non-Aldi items come from format_store_list with buy_qty, unit_price, price(line total)
-      // Aldi items come from prepare_cart with qty/unit/price(unit)
-      const isStoreList = !isAldi;
-      const unitPrice = isStoreList ? (item.unit_price ?? item.price) : (item.price || 0);
-      const lineTotal = isStoreList ? (item.price ?? null) : (item.price ? Math.round(parseFloat(item.qty||1)*item.price*100)/100 : null);
+      // All items now carry buy_qty, unit_price and price(line total) — Aldi included.
+      const unitPrice = item.unit_price ?? item.price;
+      const lineTotal = item.price ?? null;
       if(lineTotal)grandTotal+=lineTotal;
-      let qtyDisplay;
-      if(isStoreList){
-        qtyDisplay = item.buy_qty || (item.packs ? `${item.packs}× ${item.pack_label||''}` : '1');
-      } else {
-        const q=parseFloat(item.qty||1);
-        qtyDisplay = `${q%1===0?q:q.toFixed(1)}${item.unit?' '+item.unit:''}`;
-      }
+      const qtyDisplay = item.buy_qty || (item.packs ? `${item.packs}× ${item.pack_label||''}` : '1');
+      const prodUrl=item.url||'';
+      const linkCell=prodUrl?`<a href="${esc(prodUrl)}" target="_blank" class="product-link">View ↗</a>`:'';
       return `<tr>
         ${isAldi?`<td><input type="checkbox" ${item.checked?'checked':''} onchange="toggleAldiItem('${item.id}',this)" style="accent-color:var(--a)"></td>`:''}
         <td style="font-weight:500">${esc(item.item)}</td>
-        <td style="color:var(--text-muted);font-size:12px">${esc(item.matched_name||item.matchedName||'')}</td>
+        <td style="color:var(--text-muted);font-size:12px">${esc(item.matched_name||item.matchedName||'')}${linkCell?' '+linkCell:''}</td>
         <td>${esc(qtyDisplay)}</td>
         <td style="font-size:11px;color:var(--text-muted)">${esc(item.aisle||item.category||'—')}</td>
         <td>${unitPrice?formatPrice(unitPrice):'—'}${item.on_special?'<span style="font-size:10px;color:var(--gold)"> ⭐</span>':''}${item.estimated?'<span style="font-size:10px;color:#e0a040"> est.</span>':''}</td>
@@ -1921,13 +1947,13 @@ async function saveShopEdit(){
 }
 
 async function deleteShop(id){
-  if(!confirm('Delete this shop record?'))return;
+  if(!await confirmDialog('Delete this shop record?'))return;
   await fetch(BASE+`api/analytics/shop/${id}`,{method:'DELETE'});
   await loadAnalytics();
 }
 
 async function clearAllAnalytics(){
-  if(!confirm('Clear ALL shop history? This cannot be undone.'))return;
+  if(!await confirmDialog('Clear ALL shop history? This cannot be undone.','Clear All'))return;
   await fetch(BASE+'api/analytics/clear',{method:'POST'});
   await loadAnalytics();
 }
@@ -1938,9 +1964,34 @@ async function clearAllAnalytics(){
 function closeModal(id){document.getElementById(id).style.display='none'}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 
-document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o)o.style.display='none'}));
-document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.modal-overlay').forEach(m=>m.style.display='none')});
-document.addEventListener('click',e=>{if(!e.target.closest('.quick-add-wrap'))hideQuickAdd()});
+// Dropdown menus
+function toggleDropdown(id,ev){
+  if(ev)ev.stopPropagation();
+  const menu=document.getElementById(id);
+  const wasOpen=menu.classList.contains('open');
+  closeDropdowns();
+  if(!wasOpen)menu.classList.add('open');
+}
+function closeDropdowns(){document.querySelectorAll('.dropdown-menu').forEach(m=>m.classList.remove('open'))}
+
+// Promise-based in-app confirm modal (replaces window.confirm)
+let _confirmResolver=null;
+function confirmDialog(message,okLabel='Delete'){
+  return new Promise(resolve=>{
+    _confirmResolver=resolve;
+    document.getElementById('confirm-msg').textContent=message;
+    document.getElementById('confirm-ok-btn').textContent=okLabel;
+    document.getElementById('modal-confirm').style.display='flex';
+  });
+}
+function resolveConfirm(result){
+  document.getElementById('modal-confirm').style.display='none';
+  if(_confirmResolver){_confirmResolver(result);_confirmResolver=null}
+}
+
+document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{if(e.target===o){if(o.id==='modal-confirm')resolveConfirm(false);else o.style.display='none'}}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(document.getElementById('modal-confirm').style.display==='flex')resolveConfirm(false);document.querySelectorAll('.modal-overlay').forEach(m=>m.style.display='none')}});
+document.addEventListener('click',e=>{if(!e.target.closest('.quick-add-wrap'))hideQuickAdd();if(!e.target.closest('.dropdown-wrap'))closeDropdowns()});
 
 init();
 </script>
