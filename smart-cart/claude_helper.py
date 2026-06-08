@@ -292,16 +292,20 @@ Return [] if nothing to ask."""
 
 
 def suggest_bulk_buys(specials: list, settings: dict) -> list:
-    """Suggest bulk buying opportunities."""
+    """Suggest bulk buying opportunities for shelf-stable items on special."""
     try:
         if not specials:
             return []
-        prompt = f"""Analyse these specials and suggest bulk buying opportunities for non-perishable items.
+        prompt = f"""Analyse these on-special items and suggest bulk-buying opportunities.
 
-Specials:
+These are all shelf-stable / non-perishable items currently on special:
 {json.dumps(specials, indent=2)}
 
 Woolworths Rewards Plus active: {settings.get('rewards_plus_active', False)} (10% off)
+
+Suggest stocking up on items that store well: canned and packaged goods (canned tomatoes, beans,
+chickpeas, coconut milk), pasta, rice, noodles, oils, sauces, baking staples, long-life drinks, etc.
+These are exactly the things worth buying extra of when discounted.
 
 Return ONLY a JSON array:
 [
@@ -312,12 +316,12 @@ Return ONLY a JSON array:
     "special_price": 0.00,
     "suggested_qty": 2,
     "saving": 0.00,
-    "reason": "brief explanation",
+    "reason": "brief explanation e.g. 'stocks well, $1.60 off each'",
     "is_rewards_plus_suggestion": false
   }}
 ]
 
-Only suggest non-perishables with meaningful savings (>$1 per extra unit). Return []  if none."""
+Suggest any shelf-stable item with a real saving (>$0.50 per extra unit). Skip perishables. Return [] if none."""
 
         text = call_claude([{"role": "user", "content": prompt}])
         return parse_json_response(text, expect_list=True)
