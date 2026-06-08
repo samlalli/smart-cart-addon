@@ -53,6 +53,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--accent)}
 /* List */
 .list-toolbar{display:flex;gap:7px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
 .list-toolbar input[type=text]{flex:1;min-width:150px}
+.search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:var(--surface3);border:none;color:var(--text-muted);width:18px;height:18px;border-radius:50%;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;padding:0}
+.search-clear:hover{color:var(--text);background:var(--border)}
+th.sorted-asc::after{content:" ▲";font-size:9px;color:var(--accent)}
+th.sorted-desc::after{content:" ▼";font-size:9px;color:var(--accent)}
 table{width:100%;border-collapse:collapse}
 th{text-align:left;padding:8px 9px;color:var(--text-muted);font-weight:500;border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none;font-size:12px}
 th:hover{color:var(--text)}
@@ -110,6 +114,9 @@ tr:hover .row-actions{opacity:1}
 .form-field input,.form-field select,.form-field textarea{width:100%}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .ing-row{display:grid;grid-template-columns:1fr 58px 52px 1fr 26px;gap:6px;margin-bottom:6px;align-items:center}
+.ing-row.ing-row-cat{grid-template-columns:1fr 50px 46px 1fr 90px 26px}
+.ing-row.ing-row-detail{grid-template-columns:1fr 50px 44px 1fr 88px 24px 24px}
+.ing-row .ing-cat{background:var(--input-bg);border:1px solid var(--border);border-radius:4px;padding:5px 4px;color:var(--text);font-size:11px;width:100%}
 .ing-row input{background:var(--input-bg);border:1px solid var(--border);border-radius:4px;padding:5px 6px;color:var(--text);font-size:12px;width:100%}
 /* Ingredient sections */
 .ing-section-title{font-size:12px;font-weight:600;color:var(--text-muted);padding:8px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between}
@@ -222,35 +229,29 @@ tr:hover .row-actions{opacity:1}
   <div class="list-toolbar">
     <div class="quick-add-wrap">
       <input type="text" id="list-search" placeholder="Search or type to quick-add…" oninput="handleListSearch(this.value)" autocomplete="off">
+      <button class="search-clear" id="list-search-clear" onclick="clearListSearch()" style="display:none">✕</button>
       <div class="quick-add-dropdown" id="quick-add-dropdown" style="display:none"></div>
     </div>
-    <select onchange="sortList(this.value)" id="sort-select" style="min-width:140px">
-      <option value="purchase_count">Most Purchased</option>
-      <option value="item">Name A–Z</option>
-      <option value="category">Category</option>
-      <option value="source">Source</option>
-      <option value="last_purchased">Recently Bought</option>
-      <option value="included">This Week First</option>
-    </select>
     <button class="btn btn-secondary btn-sm" onclick="toggleGroupByCategory()" id="group-btn">Group by Cat</button>
     <button class="btn btn-primary" onclick="openItemModal()">+ Add Item</button>
     <div style="display:flex;gap:5px">
       <button class="btn btn-secondary btn-sm" onclick="triggerExcelExport()">📊 Excel</button>
       <button class="btn btn-secondary btn-sm" onclick="triggerPdfExport()">📄 PDF</button>
       <button class="btn btn-secondary btn-sm" onclick="triggerTextExport()">📋 Copy</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteAllItems()">🗑 Delete All</button>
     </div>
   </div>
   <div style="overflow-x:auto" id="list-container">
     <table id="list-table">
       <thead><tr>
-        <th style="width:32px"></th>
-        <th>Item</th>
-        <th style="width:130px">Qty</th>
-        <th>Category</th>
-        <th>Details</th>
-        <th>Source</th>
-        <th>Buys</th>
-        <th>Last Bought</th>
+        <th style="width:32px" onclick="sortList('included')" title="Sort by selected" id="th-included">☑</th>
+        <th onclick="sortList('item')" id="th-item">Item</th>
+        <th style="width:130px" onclick="sortList('qty')" id="th-qty">Qty</th>
+        <th onclick="sortList('category')" id="th-category">Category</th>
+        <th onclick="sortList('details')" id="th-details">Details</th>
+        <th onclick="sortList('source')" id="th-source">Source</th>
+        <th onclick="sortList('purchase_count')" id="th-purchase_count">Buys</th>
+        <th onclick="sortList('last_purchased')" id="th-last_purchased">Last Bought</th>
         <th style="width:32px"></th>
       </tr></thead>
       <tbody id="list-tbody"></tbody>
@@ -264,15 +265,34 @@ tr:hover .row-actions{opacity:1}
     <button class="btn btn-primary" onclick="showAddRecipe('url')">+ URL</button>
     <button class="btn btn-secondary" onclick="showAddRecipe('image')">📷 Photo</button>
     <button class="btn btn-secondary" onclick="showAddRecipe('manual')">✏️ Manual</button>
-    <select id="recipe-sort" onchange="renderRecipes()" style="min-width:160px;margin-left:auto">
+    <div class="quick-add-wrap" style="flex:1;min-width:160px">
+      <input type="text" id="recipe-search" placeholder="Search recipes or ingredients…" oninput="handleRecipeSearch(this.value)" autocomplete="off">
+      <button class="search-clear" id="recipe-search-clear" onclick="clearRecipeSearch()" style="display:none">✕</button>
+    </div>
+    <button class="btn btn-secondary btn-sm" id="recipe-view-btn" onclick="toggleRecipeView()">☰ List View</button>
+    <select id="recipe-sort" onchange="renderRecipes()" style="min-width:160px">
       <option value="recent">Most Recently Used</option>
       <option value="neglected">Longest Since Used</option>
       <option value="alpha">Alphabetical</option>
       <option value="count">Most Cooked</option>
       <option value="added">Date Added</option>
     </select>
+    <button class="btn btn-danger btn-sm" onclick="deleteAllRecipes()">🗑 Delete All</button>
   </div>
   <div id="recipes-grid" class="recipes-grid"></div>
+  <div id="recipes-list" style="display:none;overflow-x:auto">
+    <table id="recipe-table">
+      <thead><tr>
+        <th onclick="sortRecipeCol('name')" id="rth-name">Name</th>
+        <th onclick="sortRecipeCol('base_servings')" id="rth-base_servings">Servings</th>
+        <th onclick="sortRecipeCol('cook_count')" id="rth-cook_count">Cooked</th>
+        <th onclick="sortRecipeCol('last_cooked')" id="rth-last_cooked">Last Cooked</th>
+        <th onclick="sortRecipeCol('active_this_week')" id="rth-active_this_week">This Week</th>
+        <th style="width:32px"></th>
+      </tr></thead>
+      <tbody id="recipe-list-tbody"></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- SHOP -->
@@ -642,8 +662,48 @@ tr:hover .row-actions{opacity:1}
 // ════════════════════════════════════════════════════════════
 const BASE = window.location.pathname.replace(/\/+$/, '') + '/';
 
+// ── Robust fetch helper ──────────────────────────────────────────
+// Detects when the HA ingress session has expired (server returns an
+// HTML login page instead of JSON) and surfaces a friendly error.
+class SessionExpiredError extends Error {}
+
+async function apiFetch(path, options){
+  const r = await fetch(BASE + path, options);
+  const ct = r.headers.get('content-type') || '';
+  if(!ct.includes('application/json')){
+    const text = await r.text();
+    if(text.trim().toLowerCase().startsWith('<!doctype') || text.trim().startsWith('<')){
+      throw new SessionExpiredError('Session expired — please refresh the page and try again.');
+    }
+    throw new Error('Unexpected non-JSON response from server.');
+  }
+  if(!r.ok){
+    let msg = 'Request failed ('+r.status+')';
+    try { const j = await r.json(); if(j.error) msg = j.error; } catch(e){}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+function handleApiError(e){
+  if(e instanceof SessionExpiredError){
+    alert(e.message);
+  } else {
+    alert('Error: ' + e.message);
+  }
+  console.error(e);
+}
+
+// Keepalive — pings a lightweight endpoint every 4 minutes while the
+// tab is open, to stop the HA ingress session expiring during idle use.
+setInterval(() => {
+  fetch(BASE + 'api/list').catch(() => {});
+}, 4 * 60 * 1000);
+
 let listData={items:[]}, recipesData={recipes:[]}, settingsData={}, analyticsData={}, aldiData={};
 let currentSort={key:'purchase_count',dir:-1};
+let recipeSort={key:'recent',dir:-1};
+let recipeView='tile';
 let groupByCategory=false;
 let shopState={items:[],pantryAnswers:{},clarificationAnswers:{},priceData:null,selectedOption:null,cartData:null,currentRecipeId:null,currentStep:'pantry'};
 let imgBase64=null;
@@ -654,6 +714,7 @@ let imgBase64=null;
 async function init(){
   await Promise.all([loadList(),loadRecipes(),loadSettings(),loadAnalytics(),loadAldiList()]);
   applyTheme();
+  updateSortIndicators();
 }
 
 async function loadList(){const r=await fetch(BASE+'api/list');listData=await r.json();renderList()}
@@ -708,7 +769,17 @@ function formatPrice(price){
 
 function handleListSearch(val){
   renderList();
+  document.getElementById('list-search-clear').style.display = val ? 'flex' : 'none';
   if(val.length>=2){showQuickAdd(val)}else{hideQuickAdd()}
+}
+
+function clearListSearch(){
+  const inp=document.getElementById('list-search');
+  inp.value='';
+  document.getElementById('list-search-clear').style.display='none';
+  hideQuickAdd();
+  renderList();
+  inp.focus();
 }
 
 function showQuickAdd(query){
@@ -737,6 +808,7 @@ async function quickAddItem(id){
   }
   hideQuickAdd();
   document.getElementById('list-search').value='';
+  document.getElementById('list-search-clear').style.display='none';
   renderList();
 }
 
@@ -829,7 +901,29 @@ function itemRow(item){
 
 function sortList(key){
   if(currentSort.key===key)currentSort.dir*=-1;else{currentSort.key=key;currentSort.dir=1}
+  updateSortIndicators();
   renderList();
+}
+
+function updateSortIndicators(){
+  ['included','item','qty','category','details','source','purchase_count','last_purchased'].forEach(k=>{
+    const th=document.getElementById('th-'+k);
+    if(!th)return;
+    th.classList.remove('sorted-asc','sorted-desc');
+    if(currentSort.key===k)th.classList.add(currentSort.dir>0?'sorted-asc':'sorted-desc');
+  });
+}
+
+async function deleteAllItems(){
+  if(!(listData.items||[]).length){alert('The list is already empty.');return}
+  if(!confirm(`Delete ALL ${listData.items.length} items from the list? This cannot be undone.`))return;
+  try{
+    for(const item of [...listData.items]){
+      await apiFetch(`api/list/item/${item.id}`,{method:'DELETE'});
+    }
+    listData.items=[];
+    renderList();
+  }catch(e){handleApiError(e);await loadList();}
 }
 
 async function toggleItem(id,cb){
@@ -1022,9 +1116,53 @@ function copyText(text){
 // ════════════════════════════════════════════════════════════
 // Recipes
 // ════════════════════════════════════════════════════════════
+let recipeSearch='';
+
+function handleRecipeSearch(val){
+  recipeSearch=val.toLowerCase();
+  document.getElementById('recipe-search-clear').style.display = val ? 'flex' : 'none';
+  renderRecipes();
+}
+
+function clearRecipeSearch(){
+  recipeSearch='';
+  document.getElementById('recipe-search').value='';
+  document.getElementById('recipe-search-clear').style.display='none';
+  renderRecipes();
+}
+
+function toggleRecipeView(){
+  recipeView = recipeView==='tile' ? 'list' : 'tile';
+  document.getElementById('recipe-view-btn').textContent = recipeView==='tile' ? '☰ List View' : '▦ Tile View';
+  document.getElementById('recipes-grid').style.display = recipeView==='tile' ? 'grid' : 'none';
+  document.getElementById('recipes-list').style.display = recipeView==='list' ? 'block' : 'none';
+  // sort dropdown only relevant in tile view
+  document.getElementById('recipe-sort').style.display = recipeView==='tile' ? '' : 'none';
+  renderRecipes();
+}
+
+function sortRecipeCol(key){
+  if(recipeSort.key===key)recipeSort.dir*=-1;else{recipeSort.key=key;recipeSort.dir=1}
+  ['name','base_servings','cook_count','last_cooked','active_this_week'].forEach(k=>{
+    const th=document.getElementById('rth-'+k);
+    if(!th)return;
+    th.classList.remove('sorted-asc','sorted-desc');
+    if(recipeSort.key===k)th.classList.add(recipeSort.dir>0?'sorted-asc':'sorted-desc');
+  });
+  renderRecipes();
+}
+
+function filterRecipes(recipes){
+  if(!recipeSearch)return recipes;
+  return recipes.filter(r=>{
+    if((r.name||'').toLowerCase().includes(recipeSearch))return true;
+    return (r.ingredients||[]).some(ing=>(ing.item||'').toLowerCase().includes(recipeSearch));
+  });
+}
+
 function getSortedRecipes(){
   const sortBy=document.getElementById('recipe-sort')?.value||'recent';
-  const recipes=[...(recipesData.recipes||[])];
+  const recipes=filterRecipes([...(recipesData.recipes||[])]);
   return recipes.sort((a,b)=>{
     if(sortBy==='recent'){
       const ad=a.last_cooked||a.created||'';const bd=b.last_cooked||b.created||'';
@@ -1041,11 +1179,26 @@ function getSortedRecipes(){
   });
 }
 
+function getColumnSortedRecipes(){
+  const recipes=filterRecipes([...(recipesData.recipes||[])]);
+  const k=recipeSort.key, dir=recipeSort.dir;
+  return recipes.sort((a,b)=>{
+    let av=a[k]??'',bv=b[k]??'';
+    if(k==='active_this_week'){av=a.active_this_week?1:0;bv=b.active_this_week?1:0}
+    if(k==='base_servings'){av=a.base_servings||0;bv=b.base_servings||0}
+    if(k==='cook_count'){av=a.cook_count||0;bv=b.cook_count||0}
+    if(typeof av==='string')av=av.toLowerCase();
+    if(typeof bv==='string')bv=bv.toLowerCase();
+    return av<bv?-dir:av>bv?dir:0;
+  });
+}
+
 function renderRecipes(){
+  if(recipeView==='list'){renderRecipesList();return}
   const grid=document.getElementById('recipes-grid');
   const recipes=getSortedRecipes();
   if(!recipes.length){
-    grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="big">🍽</div><p>No recipes yet</p></div>`;
+    grid.innerHTML=`<div class="empty-state" style="grid-column:1/-1"><div class="big">🍽</div><p>${recipeSearch?'No recipes match your search':'No recipes yet'}</p></div>`;
     return;
   }
   grid.innerHTML=recipes.map(rec=>{
@@ -1072,6 +1225,48 @@ function renderRecipes(){
       <div class="recipe-card-footer"><span>🍳 ${rec.cook_count||0}×</span><span style="margin-left:auto">${last}</span></div>
     </div>`;
   }).join('');
+}
+
+function renderRecipesList(){
+  const tbody=document.getElementById('recipe-list-tbody');
+  const recipes=getColumnSortedRecipes();
+  if(!recipes.length){
+    tbody.innerHTML=`<tr><td colspan="6"><div class="empty-state">${recipeSearch?'No recipes match your search':'No recipes yet'}</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML=recipes.map(rec=>{
+    const last=rec.last_cooked?new Date(rec.last_cooked).toLocaleDateString('en-AU',{day:'numeric',month:'short',year:'numeric'}):'—';
+    return `<tr class="${rec.active_this_week?'included':''}">
+      <td style="font-weight:500;cursor:pointer" onclick="openRecipeDetail('${rec.id}')">${esc(rec.name)}</td>
+      <td>${rec.base_servings||4}</td>
+      <td style="color:var(--text-muted)">${rec.cook_count||0}×</td>
+      <td style="color:var(--text-muted);white-space:nowrap">${last}</td>
+      <td onclick="event.stopPropagation()"><label class="toggle"><input type="checkbox" ${rec.active_this_week?'checked':''} onchange="toggleRecipe('${rec.id}',this)"><span class="toggle-slider"></span></label></td>
+      <td onclick="event.stopPropagation()"><button class="icon-btn delete" onclick="quickDeleteRecipe('${rec.id}')">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function quickDeleteRecipe(id){
+  const rec=recipesData.recipes.find(r=>r.id===id);
+  if(!rec||!confirm(`Delete "${rec.name}"?`))return;
+  try{
+    await apiFetch(`api/recipes/${id}`,{method:'DELETE'});
+    recipesData.recipes=recipesData.recipes.filter(r=>r.id!==id);
+    renderRecipes();await loadList();
+  }catch(e){handleApiError(e)}
+}
+
+async function deleteAllRecipes(){
+  if(!(recipesData.recipes||[]).length){alert('There are no recipes to delete.');return}
+  if(!confirm(`Delete ALL ${recipesData.recipes.length} recipes? This cannot be undone.`))return;
+  try{
+    for(const rec of [...recipesData.recipes]){
+      await apiFetch(`api/recipes/${rec.id}`,{method:'DELETE'});
+    }
+    recipesData.recipes=[];
+    renderRecipes();await loadList();
+  }catch(e){handleApiError(e);await loadRecipes();}
 }
 
 async function toggleRecipe(id,cb){
@@ -1115,8 +1310,10 @@ function previewImg(input){
 function addManualIng(section){
   const listId=section==='buy'?'manual-ings-buy':'manual-ings-pantry';
   const list=document.getElementById(listId);
-  const div=document.createElement('div');div.className='ing-row';
-  div.innerHTML=`<input type="text" placeholder="Ingredient"><input type="number" value="1" min="0" step="0.5"><input type="text" placeholder="unit"><input type="text" placeholder="details"><button class="icon-btn delete" onclick="this.parentElement.remove()">✕</button>`;
+  const div=document.createElement('div');div.className='ing-row ing-row-cat';
+  const cats=(settingsData.categories||[]);
+  const catOpts=['<option value="">Category…</option>'].concat(cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`)).join('');
+  div.innerHTML=`<input type="text" placeholder="Ingredient"><input type="number" value="1" min="0" step="0.5"><input type="text" placeholder="unit"><input type="text" placeholder="details"><select class="ing-cat">${catOpts}</select><button class="icon-btn delete" onclick="this.parentElement.remove()">✕</button>`;
   list.appendChild(div);
 }
 
@@ -1141,21 +1338,28 @@ async function submitRecipe(type){
     payload.notes=document.getElementById('r-notes').value.trim();
     const buyRows=document.querySelectorAll('#manual-ings-buy .ing-row');
     const pantryRows=document.querySelectorAll('#manual-ings-pantry .ing-row');
+    const readRow=(row,isPantry)=>{
+      const ins=row.querySelectorAll('input');
+      const sel=row.querySelector('select.ing-cat');
+      return {item:ins[0].value.trim(),qty:parseFloat(ins[1].value)||1,unit:ins[2].value.trim(),details:ins[3].value.trim(),category:sel?sel.value:'',is_pantry:isPantry,is_small_qty:false};
+    };
     payload.ingredients=[
-      ...Array.from(buyRows).map(row=>{const ins=row.querySelectorAll('input');return{item:ins[0].value.trim(),qty:parseFloat(ins[1].value)||1,unit:ins[2].value.trim(),details:ins[3].value.trim(),is_pantry:false,is_small_qty:false}}),
-      ...Array.from(pantryRows).map(row=>{const ins=row.querySelectorAll('input');return{item:ins[0].value.trim(),qty:parseFloat(ins[1].value)||1,unit:ins[2].value.trim(),details:ins[3].value.trim(),is_pantry:true,is_small_qty:false}})
+      ...Array.from(buyRows).map(r=>readRow(r,false)),
+      ...Array.from(pantryRows).map(r=>readRow(r,true))
     ].filter(i=>i.item);
   }
 
   try{
-    const r=await fetch(BASE+'api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-    if(!r.ok){const e=await r.json();alert('Error: '+(e.error||'Failed'));return}
-    const rec=await r.json();
+    // Save first — only touch the UI after the server confirms a valid save
+    const rec=await apiFetch('api/recipes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!rec || !rec.id) throw new Error('Save did not return a valid recipe.');
     recipesData.recipes.push(rec);
     renderRecipes();
     closeModal('modal-recipe');
     openRecipeDetail(rec.id);
-  }catch(e){alert('Error: '+e.message)}
+  }catch(e){
+    handleApiError(e);
+  }
   finally{
     const bu=document.getElementById('btn-url');const bi=document.getElementById('btn-img');
     if(bu){bu.disabled=false;bu.textContent='Extract Recipe'}
@@ -1188,15 +1392,21 @@ function openRecipeDetail(id){
 function renderDetailIngredients(rec){
   const buyItems=(rec.ingredients||[]).filter(i=>!i.is_pantry&&!i.is_small_qty);
   const pantryItems=(rec.ingredients||[]).filter(i=>i.is_pantry||i.is_small_qty);
+  const cats=(settingsData.categories||[]);
 
-  const renderIng=(ings,isPantry)=>ings.map((ing,idx)=>{
+  const renderIng=(ings,isPantry)=>ings.map((ing)=>{
     const globalIdx=(rec.ingredients||[]).indexOf(ing);
-    return `<div class="ing-row" data-idx="${globalIdx}">
+    const catOpts=['<option value="">Category…</option>'].concat(
+      cats.map(c=>`<option value="${esc(c)}" ${c===ing.category?'selected':''}>${esc(c)}</option>`)
+    ).join('');
+    return `<div class="ing-row ing-row-detail" data-idx="${globalIdx}">
       <input value="${esc(ing.item)}" placeholder="Ingredient" onblur="updateIng('${rec.id}',${globalIdx},'item',this.value)">
       <input type="number" value="${ing.qty||1}" min="0" step="0.5" onblur="updateIng('${rec.id}',${globalIdx},'qty',parseFloat(this.value)||1)">
       <input value="${esc(ing.unit||'')}" placeholder="unit" onblur="updateIng('${rec.id}',${globalIdx},'unit',this.value)">
       <input value="${esc(ing.details||'')}" placeholder="shopping details" onblur="updateIng('${rec.id}',${globalIdx},'details',this.value)">
+      <select class="ing-cat" onchange="updateIng('${rec.id}',${globalIdx},'category',this.value)">${catOpts}</select>
       <button class="ing-move-btn" onclick="moveIng('${rec.id}',${globalIdx},${!isPantry})" title="${isPantry?'Move to To Buy':'Move to Minor/Pantry'}">${isPantry?'▲':'▼'}</button>
+      <button class="icon-btn delete" onclick="deleteIng('${rec.id}',${globalIdx})" title="Delete ingredient">✕</button>
     </div>`;
   }).join('');
 
@@ -1208,7 +1418,9 @@ async function updateIng(recipeId,idx,field,value){
   const rec=recipesData.recipes.find(r=>r.id===recipeId);
   if(!rec||!rec.ingredients[idx])return;
   rec.ingredients[idx][field]=value;
-  await fetch(BASE+`api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:rec.ingredients})});
+  try{
+    await apiFetch(`api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:rec.ingredients})});
+  }catch(e){handleApiError(e)}
 }
 
 async function moveIng(recipeId,idx,makePantry){
@@ -1216,16 +1428,30 @@ async function moveIng(recipeId,idx,makePantry){
   if(!rec||!rec.ingredients[idx])return;
   rec.ingredients[idx].is_pantry=makePantry;
   rec.ingredients[idx].is_small_qty=false;
-  await fetch(BASE+`api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:rec.ingredients})});
-  renderDetailIngredients(rec);
+  try{
+    await apiFetch(`api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:rec.ingredients})});
+    renderDetailIngredients(rec);
+  }catch(e){handleApiError(e)}
+}
+
+async function deleteIng(recipeId,idx){
+  const rec=recipesData.recipes.find(r=>r.id===recipeId);
+  if(!rec||!rec.ingredients[idx])return;
+  rec.ingredients.splice(idx,1);
+  try{
+    await apiFetch(`api/recipes/${recipeId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:rec.ingredients})});
+    renderDetailIngredients(rec);
+  }catch(e){handleApiError(e);await loadRecipes();}
 }
 
 async function addDetailIng(isPantry){
   const rec=recipesData.recipes.find(r=>r.id===shopState.currentRecipeId);
   if(!rec)return;
-  rec.ingredients.push({id:crypto.randomUUID(),item:'',qty:1,unit:'',details:'',is_pantry:isPantry,is_small_qty:false});
-  await fetch(BASE+`api/recipes/${rec.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:rec.ingredients})});
-  renderDetailIngredients(rec);
+  rec.ingredients.push({id:crypto.randomUUID(),item:'',qty:1,unit:'',details:'',category:'',is_pantry:isPantry,is_small_qty:false});
+  try{
+    await apiFetch(`api/recipes/${rec.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ingredients:rec.ingredients})});
+    renderDetailIngredients(rec);
+  }catch(e){handleApiError(e)}
 }
 
 async function saveRecipeNotes(){
@@ -1492,15 +1718,16 @@ function renderBreakdown(opt){
     if(!items)continue;
     for(const item of items){
       const storeData=item[store]||{};
-      const price=storeData.price||0;
-      const qty=parseFloat(item.qty||1);
-      const total=price*qty;
+      const unitPrice=storeData.unit_price ?? storeData.price ?? 0;
+      const packs=storeData.packs||1;
+      const total=storeData.line_total!=null?storeData.line_total:unitPrice*parseFloat(item.qty||1);
       const lastPrice=storeData.last_price;
-      const priceChange=lastPrice&&price?price-lastPrice.price:null;
+      const priceChange=lastPrice&&unitPrice?unitPrice-lastPrice.price:null;
       allItems.push({
-        name:item.item,qty,unit:item.unit||'',
+        name:item.item,
+        buyQty:storeData.pack_note || (storeData.pack_label?`${packs} × ${storeData.pack_label}`:`${packs}`),
         matchedName:storeData.name||'—',
-        store,price,total,
+        store,unitPrice,total,
         onSpecial:storeData.on_special,
         estimated:storeData.estimated,
         warning:storeData.warning||'',
@@ -1510,15 +1737,14 @@ function renderBreakdown(opt){
   }
   if(!allItems.length)return'<div style="color:var(--text-muted);font-size:12px">No items</div>';
   return allItems.map(item=>{
-    const qtyStr=item.qty%1===0?item.qty:item.qty.toFixed(1);
     const warn=item.warning?`<span class="badge badge-warning" style="font-size:10px">⚠️</span>`:'';
     const est=item.estimated?`<span class="badge badge-estimated" style="font-size:10px">est.</span>`:'';
     const special=item.onSpecial?`<span style="font-size:10px;color:var(--gold)">⭐ special</span>`:'';
     const hist=item.priceChange!=null?`<span style="color:${item.priceChange>0?'var(--danger)':'var(--accent)'}">  ${item.priceChange>0?'▲':'▼'}${formatPrice(Math.abs(item.priceChange))}</span>`:'';
     return `<div class="breakdown-item">
-      <div class="bi-name">${esc(item.name)} ×${qtyStr}${item.unit?' '+item.unit:''}</div>
+      <div class="bi-name">${esc(item.name)} <span style="color:var(--text-muted)">(${esc(item.buyQty)})</span></div>
       <div class="bi-match">${esc(item.matchedName)} ${warn}${est}${special}</div>
-      <div class="bi-price">${formatPrice(item.price)}/unit<br><strong>${formatPrice(item.total)}</strong>${hist}</div>
+      <div class="bi-price">${formatPrice(item.unitPrice)}/unit<br><strong>${formatPrice(item.total)}</strong>${hist}</div>
     </div>`;
   }).join('');
 }
@@ -1585,19 +1811,27 @@ function renderCartStep(cart){
     let grandTotal=0;
 
     const rows=sorted.map(item=>{
-      const qty=parseFloat(item.qty||1);
-      const price=item.price||0;
-      const total=price?Math.round(qty*price*100)/100:null;
-      if(total)grandTotal+=total;
-      const qtyStr=qty%1===0?qty:qty.toFixed(1);
+      // Non-Aldi items come from format_store_list with buy_qty, unit_price, price(line total)
+      // Aldi items come from prepare_cart with qty/unit/price(unit)
+      const isStoreList = !isAldi;
+      const unitPrice = isStoreList ? (item.unit_price ?? item.price) : (item.price || 0);
+      const lineTotal = isStoreList ? (item.price ?? null) : (item.price ? Math.round(parseFloat(item.qty||1)*item.price*100)/100 : null);
+      if(lineTotal)grandTotal+=lineTotal;
+      let qtyDisplay;
+      if(isStoreList){
+        qtyDisplay = item.buy_qty || (item.packs ? `${item.packs}× ${item.pack_label||''}` : '1');
+      } else {
+        const q=parseFloat(item.qty||1);
+        qtyDisplay = `${q%1===0?q:q.toFixed(1)}${item.unit?' '+item.unit:''}`;
+      }
       return `<tr>
         ${isAldi?`<td><input type="checkbox" ${item.checked?'checked':''} onchange="toggleAldiItem('${item.id}',this)" style="accent-color:var(--a)"></td>`:''}
         <td style="font-weight:500">${esc(item.item)}</td>
         <td style="color:var(--text-muted);font-size:12px">${esc(item.matched_name||item.matchedName||'')}</td>
-        <td>${qtyStr}${item.unit?' '+item.unit:''}</td>
+        <td>${esc(qtyDisplay)}</td>
         <td style="font-size:11px;color:var(--text-muted)">${esc(item.aisle||item.category||'—')}</td>
-        <td>${price?formatPrice(price):'—'}${item.on_special?'<span style="font-size:10px;color:var(--gold)"> ⭐</span>':''}${item.estimated?'<span style="font-size:10px;color:#e0a040"> est.</span>':''}</td>
-        <td style="font-weight:500">${total?formatPrice(total):'—'}</td>
+        <td>${unitPrice?formatPrice(unitPrice):'—'}${item.on_special?'<span style="font-size:10px;color:var(--gold)"> ⭐</span>':''}${item.estimated?'<span style="font-size:10px;color:#e0a040"> est.</span>':''}</td>
+        <td style="font-weight:500">${lineTotal?formatPrice(lineTotal):'—'}</td>
       </tr>`;
     }).join('');
 
