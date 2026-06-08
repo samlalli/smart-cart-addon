@@ -170,20 +170,21 @@ def export_excel(list_data: dict, recipes_data: dict, history_data: dict, store_
             grand_total = 0
 
             for row, item in enumerate(sorted_items, 2):
-                qty = float(item.get("qty", 1))
-                price = item.get("price")
-                total = round(qty * price, 2) if price else None
-                if total:
-                    grand_total += total
+                # price is already the line total; buy_qty is the practical purchase quantity
+                line_total = item.get("price")
+                unit_price = item.get("unit_price", line_total)
+                buy_qty = item.get("buy_qty") or str(item.get("packs", 1))
+                if line_total:
+                    grand_total += line_total
                 ws.cell(row=row, column=1, value=item.get("item", ""))
                 ws.cell(row=row, column=2, value=item.get("matched_name", ""))
-                ws.cell(row=row, column=3, value=qty)
-                ws.cell(row=row, column=4, value=item.get("unit", ""))
+                ws.cell(row=row, column=3, value=buy_qty)
+                ws.cell(row=row, column=4, value=item.get("recipe_unit", item.get("unit", "")))
                 ws.cell(row=row, column=5, value=item.get("details", ""))
                 ws.cell(row=row, column=6, value=item.get("category", ""))
                 ws.cell(row=row, column=7, value=item.get("aisle", ""))
-                ws.cell(row=row, column=8, value=price)
-                ws.cell(row=row, column=9, value=total)
+                ws.cell(row=row, column=8, value=unit_price)
+                ws.cell(row=row, column=9, value=line_total)
                 ws.cell(row=row, column=10, value="Yes" if item.get("on_special") else "")
                 ws.cell(row=row, column=11, value="Est." if item.get("estimated") else "")
 
@@ -331,20 +332,15 @@ def export_plain_text(list_data: dict, store_lists: dict = None, mode: str = "li
             for group, group_items in sorted(groups.items()):
                 lines.append(f"  {group}")
                 for item in group_items:
-                    qty = float(item.get("qty", 1))
-                    unit = item.get("unit", "")
-                    price = item.get("price")
-                    total = round(qty * price, 2) if price else None
-                    if total:
-                        grand_total += total
-
-                    qty_str = f"{qty:g}" if qty != int(qty) else str(int(qty))
-                    unit_str = f" {unit}" if unit else ""
-                    price_str = format_price(price) if price else "—"
+                    line_total = item.get("price")  # already the line total
+                    if line_total:
+                        grand_total += line_total
+                    buy_qty = item.get("buy_qty") or str(item.get("packs", 1))
+                    price_str = format_price(line_total) if line_total else "—"
                     est_str = " (est.)" if item.get("estimated") else ""
                     special_str = " ⭐ ON SPECIAL" if item.get("on_special") else ""
 
-                    lines.append(f"  • {item.get('item', '')}{unit_str} × {qty_str} — {price_str}{est_str}{special_str}")
+                    lines.append(f"  • {item.get('item', '')} — {buy_qty} — {price_str}{est_str}{special_str}")
                 lines.append("")
 
             lines.append(f"  TOTAL: {format_price(grand_total)}")
