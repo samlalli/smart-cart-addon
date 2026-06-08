@@ -80,7 +80,11 @@ def calculate_options(priced_items: list, delivery_fees: dict, settings: dict) -
         data = item.get(store)
         if not data:
             return None
-        price = data["price"] * float(item.get("qty", 1))
+        # Prefer pack-aware line_total (packs × unit price); fall back to legacy price×qty
+        if data.get("line_total") is not None:
+            price = float(data["line_total"])
+        else:
+            price = data["price"] * float(item.get("qty", 1))
         if store == "woolworths":
             price = apply_rewards_plus(price, rewards_plus)
         return round(price, 2)
