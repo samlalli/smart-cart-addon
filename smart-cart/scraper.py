@@ -191,6 +191,7 @@ def search_woolworths_raw(item_name: str, store_id: str = None) -> list:
                     "aisle": aisle,
                     "cup_price": cup_price,
                     "cup_measure": cup_measure,
+                    "url": f"https://www.woolworths.com.au/shop/productdetails/{stockcode}" if stockcode else "",
                     "store": "woolworths"
                 })
         return results
@@ -263,6 +264,10 @@ def search_coles_raw(item_name: str) -> list:
             pricing = product.get("pricing", {})
             price = pricing.get("now") if isinstance(pricing, dict) else product.get("price")
             was = pricing.get("was") if isinstance(pricing, dict) else None
+            slug = product.get("seoToken") or product.get("slug") or ""
+            pid = product.get("id") or product.get("productId") or ""
+            prod_url = f"https://www.coles.com.au/product/{slug}" if slug else (
+                f"https://www.coles.com.au/search?q={requests.utils.quote(name)}" if name else "")
             if name and price is not None:
                 try:
                     price = float(str(price).replace("$", ""))
@@ -271,6 +276,7 @@ def search_coles_raw(item_name: str) -> list:
                         "price": price,
                         "was_price": float(str(was).replace("$", "")) if was else None,
                         "on_special": was is not None,
+                        "url": prod_url,
                         "store": "coles"
                     })
                 except Exception:
@@ -349,22 +355,26 @@ def search_aldi_raw(item_name: str) -> list:
 
 # ── Claude matching ───────────────────────────────────────────────────────────
 
-def pick_best_match(item_name: str, item_details: str, candidates: list, store: str) -> dict | None:
-    """Use Claude to pick the best matching product from candidates."""
+def pick_valid_matches(item_name: str, item_details: str, candidates: list, store: str) -> list:
+    """
+    Use Claude to identify ALL candidates that are a genuine match for the item.
+    Returns a list of candidate dicts (may be empty). Cost optimisation happens later.
+    """
     if not candidates:
-        return None
+        return []
+    # Single candidate — accept if it passes sanity check
     if len(candidates) == 1:
         ok, _ = sanity_check(candidates[0]["price"], item_name)
-        return candidates[0] if ok else None
+        return [candidates[0]] if ok else []
 
     try:
         import requests as http_req
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
-            # Fallback: pick cheapest passing sanity check
-            return _pick_cheapest(candidates, item_name)
+            # No Claude — accept all that pass sanity check
+            return [c for c in candidates if sanity_check(c["price"], item_name)[0]]
 
-        prompt = f"""You are matching a shopping-list item to the correct supermarket product. Be strict.
+        prompt = f"""You are matching a shopping-list item to supermarket products. Be strict.
 
 Shopping list item: "{item_name}"
 Details/preferences: "{item_details or 'none'}"
@@ -374,41 +384,66 @@ Candidates from {store}:
 
 STRICT MATCHING RULES:
 1. The candidate's PRIMARY product must BE the item — not merely contain it as an ingredient.
-   - "frozen spinach" must match a bag of frozen spinach, NOT "Spinach & Ricotta Ravioli" or a meal containing spinach.
+   - "frozen spinach" must match a bag of frozen spinach, NOT "Spinach & Ricotta Ravioli".
    - "tomato" must match fresh tomatoes, NOT "tomato sauce" or "tomato soup".
-2. Honour form/state qualifiers in the item or details: fresh vs frozen vs canned vs dried, whole vs sliced, plain vs flavoured. A different form is NOT a match.
-3. Honour the item type: a raw ingredient is not a prepared meal, a sauce, or a snack version of it.
-4. If several candidates genuinely satisfy rules 1–3, choose the CHEAPEST.
-5. If NO candidate is a genuine match under these rules, return null. Do not force a weak match.
+2. Honour form/state qualifiers: fresh vs frozen vs canned vs dried, whole vs sliced. A different form is NOT a match.
+3. A raw ingredient is not a prepared meal, a sauce, or a snack version of it.
+4. Return ALL candidates that genuinely match — different brands and pack sizes of the same product are all valid matches. Do NOT filter by price; cost is handled separately.
+5. If NO candidate genuinely matches, return an empty list.
 
-Reply with ONLY a JSON object: {{"index": 0, "reason": "brief reason"}} or {{"index": null, "reason": "no genuine match"}}"""
+Reply with ONLY a JSON object listing every matching index:
+{{"matches": [0, 2, 3], "reason": "brief reason"}} or {{"matches": [], "reason": "no genuine match"}}"""
 
         resp = http_req.post(
             "https://api.anthropic.com/v1/messages",
             headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-            json={"model": "claude-haiku-4-5", "max_tokens": 100, "messages": [{"role": "user", "content": prompt}]},
+            json={"model": "claude-haiku-4-5", "max_tokens": 150, "messages": [{"role": "user", "content": prompt}]},
             timeout=15
         )
         if resp.status_code == 200:
             text = resp.json()["content"][0]["text"].strip()
             clean = text.replace("```json", "").replace("```", "").strip()
             result = json.loads(clean)
-            idx = result.get("index")
-            if idx is None:
-                # Claude judged no genuine match — respect that, don't force one
-                return None
-            if 0 <= idx < len(candidates):
-                candidate = candidates[idx]
-                ok, msg = sanity_check(candidate["price"], item_name)
-                if ok:
-                    return candidate
-                else:
-                    print(f"Sanity check failed for {item_name}: {msg}")
-                    return None
+            idxs = result.get("matches", [])
+            valid = []
+            for idx in idxs:
+                if isinstance(idx, int) and 0 <= idx < len(candidates):
+                    c = candidates[idx]
+                    if sanity_check(c["price"], item_name)[0]:
+                        valid.append(c)
+            return valid
     except Exception as e:
         print(f"Claude matching error: {e}")
 
-    return _pick_cheapest(candidates, item_name)
+    # Fallback — accept all passing sanity check
+    return [c for c in candidates if sanity_check(c["price"], item_name)[0]]
+
+
+def _best_by_total_cost(matches: list, required_qty: float, required_unit: str):
+    """
+    From a list of valid product matches, pick the one with the lowest TOTAL cost
+    to fulfil the required quantity (accounting for pack size). Returns (match, pack_info).
+    """
+    best = None
+    best_pack = None
+    best_total = None
+    for m in matches:
+        pack = calc_packs_needed(required_qty, required_unit, m.get("name", ""))
+        total = round(float(m["price"]) * pack["packs"], 2)
+        if best_total is None or total < best_total:
+            best_total = total
+            best = m
+            best_pack = pack
+    return best, best_pack
+
+
+# Backwards-compatible single-match helper (used by specials check)
+def pick_best_match(item_name: str, item_details: str, candidates: list, store: str) -> dict | None:
+    matches = pick_valid_matches(item_name, item_details, candidates, store)
+    if not matches:
+        return None
+    best, _ = _best_by_total_cost(matches, 1, "")
+    return best
 
 
 def _pick_cheapest(candidates: list, item_name: str) -> dict | None:
@@ -422,23 +457,40 @@ def _pick_cheapest(candidates: list, item_name: str) -> dict | None:
 # ── Main search function ──────────────────────────────────────────────────────
 
 def _resolve_store(item_name, item_details, required_qty, required_unit, candidates, store):
-    """Match candidates, attach pack-size calc, price history and sanity info."""
-    match = pick_best_match(item_name, item_details, candidates, store.capitalize())
+    """Match candidates, pick cheapest by total cost, attach pack/price/history info."""
+    matches = pick_valid_matches(item_name, item_details, candidates, store.capitalize())
+    if not matches:
+        return None
+
+    match, pack = _best_by_total_cost(matches, required_qty, required_unit)
     if not match:
         return None
+
+    # Build the alternatives list (for transparency in the breakdown)
+    alternatives = []
+    for m in matches:
+        p = calc_packs_needed(required_qty, required_unit, m.get("name", ""))
+        alternatives.append({
+            "name": m.get("name", ""),
+            "unit_price": float(m["price"]),
+            "packs": p["packs"],
+            "pack_label": p["pack_label"],
+            "total": round(float(m["price"]) * p["packs"], 2),
+            "url": m.get("url", "")
+        })
+    alternatives.sort(key=lambda x: x["total"])
+
     ok, warning = sanity_check(match["price"], item_name)
     last = get_last_price(item_name, store)
+    unit_price = float(match["price"])
     match["warning"] = warning if not ok else ""
     match["last_price"] = last
-
-    # Pack-size: how many packs to actually buy, and the true line total
-    pack = calc_packs_needed(required_qty, required_unit, match.get("name", ""))
-    unit_price = float(match["price"])
     match["packs"] = pack["packs"]
     match["pack_label"] = pack["pack_label"]
     match["pack_note"] = pack["note"]
     match["unit_price"] = unit_price
     match["line_total"] = round(unit_price * pack["packs"], 2)
+    match["alternatives"] = alternatives[:5]
 
     if ok:
         record_price(item_name, store, unit_price, match["name"])
@@ -517,13 +569,29 @@ def get_delivery_fees(settings: dict) -> dict:
     }
 
 
+SHELF_STABLE_CATEGORIES = {"canned & packaged", "cupboard", "baking", "condiments & sauces", "drinks"}
+SHELF_STABLE_KEYWORDS = ("can", "tin", "tinned", "canned", "jar", "packet", "pasta", "rice",
+                          "noodle", "cereal", "flour", "sugar", "oil", "sauce", "stock",
+                          "lentil", "bean", "chickpea", "coconut milk", "long life", "uht")
+
+def _is_bulk_eligible(item: dict) -> bool:
+    """Eligible for bulk-buy if explicitly cupboard, or a shelf-stable category/keyword."""
+    if item.get("is_cupboard"):
+        return True
+    cat = (item.get("category") or "").lower().strip()
+    if cat in SHELF_STABLE_CATEGORIES:
+        return True
+    name = (item.get("item") or "").lower()
+    return any(k in name for k in SHELF_STABLE_KEYWORDS)
+
+
 def check_for_specials(items: list, settings: dict = None) -> list:
-    """Check which cupboard items are on special."""
+    """Check which shelf-stable items are on special (bulk-buy candidates)."""
     if settings is None:
         settings = {}
     specials = []
     for item in items:
-        if not item.get("is_cupboard"):
+        if not _is_bulk_eligible(item):
             continue
         try:
             if settings.get("include_woolworths", True):
@@ -537,7 +605,8 @@ def check_for_specials(items: list, settings: dict = None) -> list:
                             "store": "Woolworths",
                             "special_price": match["price"],
                             "normal_price": match["was_price"],
-                            "is_cupboard": True
+                            "category": item.get("category", ""),
+                            "shelf_stable": True
                         })
             time.sleep(0.3)
             if settings.get("include_coles", True):
@@ -551,7 +620,8 @@ def check_for_specials(items: list, settings: dict = None) -> list:
                             "store": "Coles",
                             "special_price": match["price"],
                             "normal_price": match["was_price"],
-                            "is_cupboard": True
+                            "category": item.get("category", ""),
+                            "shelf_stable": True
                         })
             time.sleep(0.3)
         except Exception as e:
@@ -600,6 +670,8 @@ def format_store_list(items: list, store: str) -> list:
             "unit_price": unit_price,
             "price": line_total,           # line total for this item
             "matched_name": store_data.get("name", ""),
+            "url": store_data.get("url", ""),
+            "alternatives": store_data.get("alternatives", []),
             "on_special": store_data.get("on_special", False),
             "aisle": store_data.get("aisle", ""),
             "estimated": store_data.get("estimated", False),
