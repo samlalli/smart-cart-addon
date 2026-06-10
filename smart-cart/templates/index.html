@@ -255,7 +255,7 @@ tr:hover .row-actions{opacity:1}
           <div class="dropdown-item" onclick="triggerTextExport();closeDropdowns()">📋 Copy as text</div>
         </div>
       </div>
-      <button class="btn btn-danger btn-sm" onclick="deleteAllItems()">🗑 Delete All</button>
+      <button class="icon-btn delete" onclick="deleteAllItems()" title="Delete all items" style="width:30px;height:30px">🗑</button>
     </div>
   </div>
   <div style="overflow-x:auto" id="list-container">
@@ -294,7 +294,7 @@ tr:hover .row-actions{opacity:1}
       <option value="count">Most Cooked</option>
       <option value="added">Date Added</option>
     </select>
-    <button class="btn btn-danger btn-sm" onclick="deleteAllRecipes()">🗑 Delete All</button>
+    <button class="icon-btn delete" onclick="deleteAllRecipes()" title="Delete all recipes" style="width:30px;height:30px">🗑</button>
   </div>
   <div id="recipes-grid" class="recipes-grid"></div>
   <div id="recipes-list" style="display:none;overflow-x:auto">
@@ -432,7 +432,7 @@ tr:hover .row-actions{opacity:1}
       <p style="color:var(--text-muted);font-size:12px;margin-bottom:12px">Approve or skip:</p>
       <div id="bulk-suggestions"></div>
       <div style="display:flex;gap:8px;margin-top:4px">
-        <button class="btn btn-secondary" onclick="goStep('clarify')">← Back</button>
+        <button class="btn btn-secondary" onclick="backFromSpecials()">← Back</button>
         <button class="btn btn-primary" onclick="prepareCart()">Prepare Cart →</button>
       </div>
     </div>
@@ -527,7 +527,12 @@ tr:hover .row-actions{opacity:1}
     </div>
     <div class="modal-body">
       <div id="recipe-form-url" style="display:none;flex-direction:column;gap:11px">
-        <div class="form-field"><label>Recipe URL</label><input type="url" id="r-url" placeholder="https://www.taste.com.au/…"></div>
+        <div class="form-field"><label>Recipe URL</label>
+          <div class="quick-add-wrap">
+            <input type="url" id="r-url" placeholder="https://www.taste.com.au/…" oninput="document.getElementById('r-url-clear').style.display=this.value?'flex':'none'">
+            <button class="search-clear" id="r-url-clear" onclick="document.getElementById('r-url').value='';this.style.display='none';document.getElementById('r-url').focus()" style="display:none">✕</button>
+          </div>
+        </div>
         <p style="font-size:12px;color:var(--text-muted)">Claude will fetch and extract ingredients automatically.</p>
         <button class="btn btn-primary" id="btn-url" onclick="submitRecipe('url')">Extract Recipe</button>
       </div>
@@ -1364,6 +1369,9 @@ async function submitRecipe(type){
     if(!rec || !rec.id) throw new Error('Save did not return a valid recipe.');
     recipesData.recipes.push(rec);
     renderRecipes();
+    // Clear the URL field so it's ready for the next one
+    const urlField=document.getElementById('r-url');
+    if(urlField){urlField.value='';const c=document.getElementById('r-url-clear');if(c)c.style.display='none';}
     closeModal('modal-recipe');
     openRecipeDetail(rec.id);
   }catch(e){
@@ -1581,6 +1589,15 @@ function showStep(step){
 
 function goStep(step){showStep(step)}
 
+function backFromSpecials(){
+  // Clarify step only exists when there were genuine ambiguities
+  if(shopState.clarifications && shopState.clarifications.length){
+    showStep('clarify');
+  } else {
+    showStep('prices');
+  }
+}
+
 async function runShop(){
   const btn=document.getElementById('run-btn');btn.disabled=true;btn.textContent='Preparing…';
   document.getElementById('progress-log').innerHTML='';
@@ -1674,6 +1691,14 @@ async function applyProductChoices(){
     // Re-pick the same option id the user chose, refreshed
     const prevId=shopState.selectedOption?.id;
     shopState.selectedOption=data.options.find(o=>o.id===prevId)||data.options[0];
+    // Refresh the (currently hidden) prices step so Back shows updated totals
+    renderOptions(data.options);
+    const prevIdx=data.options.findIndex(o=>o.id===shopState.selectedOption?.id);
+    if(prevIdx>=0){
+      const card=document.querySelector(`.option-card[data-idx="${prevIdx}"]`);
+      if(card)card.classList.add('selected');
+      document.getElementById('choose-btn').disabled=false;
+    }
   }catch(e){handleApiError(e)}
 }
 
@@ -1696,7 +1721,7 @@ async function applyManualPrices(){
   for(const input of inputs){
     const item=input.dataset.item;
     const price=parseFloat(input.value);
-    const store=document.querySelector(`[data-item-store="${item}"]`)?.value;
+    const store=document.querySelector(`[data-item-store="${(window.CSS&&CSS.escape)?CSS.escape(item):item.replace(/["\\]/g,'')}"]`)?.value;
     if(item&&price>0&&store){
       await fetch(BASE+'api/shop/prices/manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item,price,store})});
     }
@@ -1864,8 +1889,9 @@ function renderCartStep(cart){
     html+=`<div class="store-list-section">
       <div class="store-list-header">
         <div style="font-weight:600;font-size:14px;color:#${fg}">${emoji} ${store.charAt(0).toUpperCase()+store.slice(1)} · ${items.length} items</div>
-        ${!isAldi&&data.deep_link?`<a href="${esc(data.deep_link)}" target="_blank" class="btn btn-sm btn-primary">Open ${store.charAt(0).toUpperCase()+store.slice(1)} →</a>`:''}
+        ${!isAldi?`<button class="btn btn-sm btn-primary" onclick="openAllItems('${store}')">Open Items ↗</button>`:''}
       </div>
+      <div id="open-items-note-${store}" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;display:none"></div>
       <div style="overflow-x:auto">
       <table class="store-list-table">
         <thead><tr>
@@ -1885,14 +1911,43 @@ function renderCartStep(cart){
   document.getElementById('instore-lists').innerHTML=html||'<div style="color:var(--text-muted)">No cart data</div>';
 }
 
+function openAllItems(store){
+  const data=shopState.cartData?.[store];
+  if(!data)return;
+  const items=data.list||data.items||[];
+  const searchBase = store==='woolworths'
+    ? 'https://www.woolworths.com.au/shop/search/products?searchTerm='
+    : 'https://www.coles.com.au/search?q=';
+  let opened=0, searched=0;
+  items.forEach(item=>{
+    let url=item.url||'';
+    if(!url){
+      // No matched product — open a search so the user can pick manually
+      const q=[item.item,item.details].filter(Boolean).join(' ');
+      url=searchBase+encodeURIComponent(q);
+      searched++;
+    } else {
+      opened++;
+    }
+    window.open(url,'_blank');
+  });
+  const note=document.getElementById('open-items-note-'+store);
+  if(note){
+    note.style.display='block';
+    note.textContent=`Opened ${opened+searched} tab(s)${searched?` (${searched} as searches — no exact match)`:''}. If tabs were blocked, allow pop-ups for this site and try again.`;
+  }
+}
+
 async function completeShop(){
-  const cheapestSingle=Math.min(...(shopState.priceData?.options||[]).filter(o=>o.stores.length===1).map(o=>o.total).filter(Boolean));
+  const singleTotals=(shopState.priceData?.options||[]).filter(o=>o.stores.length===1).map(o=>o.total).filter(t=>typeof t==='number'&&isFinite(t)&&t>0);
+  const cheapestSingle=singleTotals.length?Math.min(...singleTotals):null;
   await fetch(BASE+'api/shop/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
     option:shopState.selectedOption,items:shopState.items,
     item_count:shopState.items.length,
-    cheapest_single_store:cheapestSingle||shopState.selectedOption?.total
+    cheapest_single_store:(cheapestSingle&&isFinite(cheapestSingle))?cheapestSingle:(shopState.selectedOption?.total||0)
   })});
   await loadList();await loadRecipes();await loadAnalytics();await loadAldiList();
+  await loadSettings(); // refresh settings so Rewards Plus toggle reflects auto-clear
   document.getElementById('shop-flow').style.display='none';
   document.getElementById('progress-log').style.display='none';
   alert('🎉 Shop complete! Analytics updated.');
