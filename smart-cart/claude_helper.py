@@ -291,6 +291,46 @@ Return [] if nothing to ask."""
         return []
 
 
+def assess_ambiguity(item_name: str, item_details: str, products: list) -> bool:
+    """
+    Decide whether a set of matched products represents GENUINELY different products
+    (worth asking the user about) versus just pack-size/brand variants of the same thing.
+    Returns True only if the user should be asked to choose.
+    """
+    try:
+        # Quick pre-filter: if every product name is very similar, skip the Claude call
+        names = [p.get("name", "") for p in products]
+        if len(names) < 2:
+            return False
+
+        prompt = f"""A shopper's list item was matched to multiple supermarket products.
+Decide if these are GENUINELY DIFFERENT products the shopper must choose between,
+or just variations (different pack sizes / brands) of essentially the same thing.
+
+Shopping list item: "{item_name}"
+Details: "{item_details or 'none'}"
+
+Matched products:
+{json.dumps(names, indent=2)}
+
+Answer TRUE (ask the user) only if the products differ in a way that matters to the shopper
+and can't be resolved from the item name/details — e.g. chicken breast vs chicken thigh,
+smooth vs crunchy peanut butter, dairy vs oat milk.
+
+Answer FALSE (don't ask) if they're just different sizes or brands of the same product,
+e.g. "Mushrooms 200g" vs "Mushrooms 500g", or "Coles Milk 2L" vs "Pauls Milk 2L" —
+the system can just pick the cheapest of those.
+
+Reply with ONLY: {{"ask": true}} or {{"ask": false}}"""
+
+        text = call_claude([{"role": "user", "content": prompt}], max_tokens=50)
+        result = parse_json_response(text)
+        return bool(result.get("ask", False))
+    except Exception:
+        # On error, default to NOT asking (avoids spamming clarifications)
+        return False
+
+
 def suggest_bulk_buys(specials: list, settings: dict) -> list:
     """Suggest bulk buying opportunities for shelf-stable items on special."""
     try:
@@ -330,16 +370,24 @@ Suggest any shelf-stable item with a real saving (>$0.50 per extra unit). Skip p
 
 
 def convert_units(qty: float, from_unit: str, to_unit: str) -> float:
-    """Convert between common units."""
-    conversions = {
-        ("g", "kg"): 0.001, ("kg", "g"): 1000,
-        ("ml", "l"): 0.001, ("l", "ml"): 1000,
-        ("tsp", "tbsp"): 0.333, ("tbsp", "tsp"): 3,
-        ("cup", "ml"): 250, ("ml", "cup"): 0.004,
-        ("tbsp", "ml"): 15, ("tsp", "ml"): 5,
-    }
-    key = (from_unit.lower().strip(), to_unit.lower().strip())
-    return qty * conversions.get(key, 1)
+    """
+    Convert between common units via base units (g for weight, ml for volume).
+    Raises ValueError for unknown or incompatible unit pairs, so callers can
+    handle them explicitly (e.g. consolidate creates a separate entry).
+    """
+    # Base-unit factors: weight in grams, volume in millilitres
+    weight = {"g": 1, "kg": 1000, "oz": 28.35, "lb": 453.6}
+    volume = {"ml": 1, "l": 1000, "litre": 1000, "tsp": 5, "tbsp": 15,
+              "cup": 250, "cups": 250, "fl oz": 30}
+
+    f = (from_unit or "").lower().strip()
+    t = (to_unit or "").lower().strip()
+
+    if f in weight and t in weight:
+        return qty * weight[f] / weight[t]
+    if f in volume and t in volume:
+        return qty * volume[f] / volume[t]
+    raise ValueError(f"Cannot convert between '{from_unit}' and '{to_unit}'")
 
 
 def units_compatible(unit1: str, unit2: str) -> bool:
