@@ -241,22 +241,27 @@ def export_pdf(list_data: dict, settings: dict = None) -> bytes:
         cat = item.get("category") or "Other"
         categories.setdefault(cat, []).append(item)
 
+    from xml.sax.saxutils import escape as _xml_escape
+
     story = []
-    story.append(Paragraph("🛒 Smart Cart", title_style))
+    story.append(Paragraph("Smart Cart", title_style))
     story.append(Paragraph(f"Shopping List — {datetime.now().strftime('%d %B %Y')}", date_style))
     story.append(HRFlowable(width="100%", thickness=2, color=accent, spaceAfter=12))
 
     total_items = 0
     for cat, cat_items in sorted(categories.items()):
-        story.append(Paragraph(cat.upper(), cat_style))
+        story.append(Paragraph(_xml_escape(str(cat).upper()), cat_style))
         for item in cat_items:
-            qty = item.get("qty", 1)
-            unit = item.get("unit", "")
-            details = item.get("details", "")
-            name = item.get("item", "")
-            notes = item.get("notes", "")
+            try:
+                qty = float(item.get("qty", 1) or 1)
+            except (TypeError, ValueError):
+                qty = 1.0
+            unit = _xml_escape(str(item.get("unit", "") or ""))
+            details = _xml_escape(str(item.get("details", "") or ""))
+            name = _xml_escape(str(item.get("item", "") or ""))
+            notes = _xml_escape(str(item.get("notes", "") or ""))
 
-            qty_str = f"{qty:g}" if qty != int(qty) else str(int(qty))
+            qty_str = f"{qty:g}"
             unit_str = f" {unit}" if unit else ""
             details_str = f" — {details}" if details else ""
             notes_str = f" ({notes})" if notes else ""
@@ -299,13 +304,16 @@ def export_plain_text(list_data: dict, store_lists: dict = None, mode: str = "li
         for cat, cat_items in sorted(categories.items()):
             lines.append(cat.upper())
             for item in cat_items:
-                qty = item.get("qty", 1)
+                try:
+                    qty = float(item.get("qty", 1) or 1)
+                except (TypeError, ValueError):
+                    qty = 1.0
                 unit = item.get("unit", "")
                 details = item.get("details", "")
                 name = item.get("item", "")
                 notes = item.get("notes", "")
 
-                qty_str = f"{qty:g}" if qty != int(qty) else str(int(qty))
+                qty_str = f"{qty:g}"
                 unit_str = f" {unit}" if unit else ""
                 details_str = f" ({details})" if details else ""
                 notes_str = f" — {notes}" if notes else ""
