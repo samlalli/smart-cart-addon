@@ -123,12 +123,21 @@ def calc_packs_needed(required_qty: float, required_unit: str, product_name: str
     Returns dict: {packs, pack_label, note} — packs is always a whole number >= 1.
     Falls back to 1 pack when units can't be reconciled.
     """
-    required_qty = float(required_qty or 1)
+    try:
+        required_qty = float(required_qty or 1)
+    except (TypeError, ValueError):
+        required_qty = 1.0
     pack = parse_pack_size(product_name)
+    unit_l = (required_unit or "").lower().strip()
+    is_weight_or_volume_unit = unit_l in _PACK_UNIT_GROUPS or unit_l in ("cup", "cups", "tbsp", "tsp", "fl oz", "oz", "lb")
 
     if not pack:
-        return {"packs": max(1, _math.ceil(required_qty)) if (required_unit or "").lower() in ("", "ea", "each", "unit", "piece", "pack") else 1,
-                "pack_label": "", "note": ""}
+        # Product has no parseable pack size. If the shopper's unit is a count-style
+        # unit (each, bunch, head, etc — anything that isn't weight/volume),
+        # buy ceil(qty); otherwise we can't determine packs, so buy 1.
+        if not is_weight_or_volume_unit:
+            return {"packs": max(1, _math.ceil(required_qty)), "pack_label": "", "note": ""}
+        return {"packs": 1, "pack_label": "", "note": "1 (check quantity)"}
 
     pack_amount, group, pack_label = pack
 
@@ -141,13 +150,72 @@ def calc_packs_needed(required_qty: float, required_unit: str, product_name: str
     # weight/volume — convert required into same base units
     required_base = _required_in_group(required_qty, required_unit, group)
     if required_base is None:
-        # Units incompatible (e.g. recipe says "1.5 cups", pack is grams) — buy 1, flag it
+        # Units incompatible (e.g. recipe says "1.5 cups", pack is grams).
+        # If the shopper's unit is count-style, buy ceil(qty) of the pack;
+        # otherwise buy 1 and flag for checking.
+        if not is_weight_or_volume_unit and unit_l:
+            packs = max(1, _math.ceil(required_qty))
+            return {"packs": packs, "pack_label": pack_label,
+                    "note": f"{packs} × {pack_label}" if packs > 1 else pack_label}
         return {"packs": 1, "pack_label": pack_label,
                 "note": f"1 × {pack_label} (check quantity)"}
 
     packs = max(1, _math.ceil(required_base / pack_amount))
     return {"packs": packs, "pack_label": pack_label,
             "note": f"{packs} × {pack_label}" if packs > 1 else pack_label}
+
+
+# ── Search query builder ──────────────────────────────────────────────────────
+
+# Product descriptors worth adding to a search query (narrow the result set)
+_DESCRIPTOR_KEYWORDS = (
+    "thigh", "breast", "fillet", "drumstick", "wing", "mince", "diced", "whole",
+    "fresh", "frozen", "dried", "canned", "tinned", "leaf", "leaves", "baby",
+    "wholemeal", "wholegrain", "white", "brown", "red", "green", "free range",
+    "skinless", "boneless", "lean", "extra virgin", "light", "full cream",
+    "skim", "low fat", "unsalted", "salted", "plain", "self raising",
+)
+# Prep instructions to strip — these describe how to cook, not what to buy
+_PREP_WORDS = ("crushed", "chopped", "sliced", "minced", "grated", "peeled",
+               "to taste", "finely", "roughly", "cubed", "shredded", "halved")
+
+# Disambiguation hints for items whose bare name returns prepared meals etc.
+_SEARCH_HINTS = {
+    "frozen spinach": "spinach frozen chopped",
+    "frozen peas": "peas frozen",
+    "frozen corn": "corn kernels frozen",
+}
+
+def build_search_query(item_name: str, item_details: str = "") -> str:
+    """
+    Build a focused search query from the item name plus meaningful descriptors
+    in the details field. Strips prep instructions; keeps product descriptors.
+    Uses word-boundary matching to avoid false hits ("red" inside "shredded").
+    """
+    name = (item_name or "").strip()
+    details = (item_details or "").lower()
+
+    # Specific disambiguation hints take priority
+    key = name.lower().strip()
+    if key in _SEARCH_HINTS:
+        base = _SEARCH_HINTS[key]
+    else:
+        base = name
+
+    # Pull useful descriptors out of details using word boundaries,
+    # so "red" doesn't match inside "shredded" or "light" inside "slightly".
+    extras = []
+    base_lower = base.lower()
+    for kw in _DESCRIPTOR_KEYWORDS:
+        if _re.search(r'\b' + _re.escape(kw) + r'\b', details) and \
+           not _re.search(r'\b' + _re.escape(kw) + r'\b', base_lower):
+            extras.append(kw)
+
+    # Limit to the two most specific descriptors to avoid over-narrowing
+    query = base
+    if extras:
+        query = f"{base} {' '.join(extras[:2])}"
+    return query.strip()
 
 
 # ── Woolworths ────────────────────────────────────────────────────────────────
@@ -173,27 +241,30 @@ def search_woolworths_raw(item_name: str, store_id: str = None) -> list:
         products = data.get("Products", [])
         results = []
         for product in products:
-            info = product.get("Products", [{}])[0] if product.get("Products") else product
-            name = info.get("DisplayName") or info.get("Name", "")
-            price = info.get("Price")
-            was_price = info.get("WasPrice")
-            stockcode = info.get("Stockcode", "")
-            aisle = info.get("AdditionalAttributes", {}).get("aisleName", "")
-            cup_price = info.get("CupPrice", "")
-            cup_measure = info.get("CupMeasure", "")
-            if name and price is not None:
-                results.append({
-                    "name": name,
-                    "price": float(price),
-                    "was_price": float(was_price) if was_price else None,
-                    "on_special": was_price is not None and float(was_price) > float(price),
-                    "stockcode": stockcode,
-                    "aisle": aisle,
-                    "cup_price": cup_price,
-                    "cup_measure": cup_measure,
-                    "url": f"https://www.woolworths.com.au/shop/productdetails/{stockcode}" if stockcode else "",
-                    "store": "woolworths"
-                })
+            try:
+                info = product.get("Products", [{}])[0] if product.get("Products") else product
+                name = info.get("DisplayName") or info.get("Name", "")
+                price = info.get("Price")
+                was_price = info.get("WasPrice")
+                stockcode = info.get("Stockcode", "")
+                aisle = (info.get("AdditionalAttributes") or {}).get("aisleName", "")
+                cup_price = info.get("CupPrice", "")
+                cup_measure = info.get("CupMeasure", "")
+                if name and price is not None:
+                    results.append({
+                        "name": name,
+                        "price": float(price),
+                        "was_price": float(was_price) if was_price else None,
+                        "on_special": was_price is not None and float(was_price) > float(price),
+                        "stockcode": stockcode,
+                        "aisle": aisle,
+                        "cup_price": cup_price,
+                        "cup_measure": cup_measure,
+                        "url": f"https://www.woolworths.com.au/shop/productdetails/{stockcode}" if stockcode else "",
+                        "store": "woolworths"
+                    })
+            except (TypeError, ValueError, KeyError, IndexError):
+                continue  # one malformed product shouldn't kill the whole result set
         return results
     except Exception as e:
         print(f"Woolworths search error for '{item_name}': {e}")
@@ -355,6 +426,37 @@ def search_aldi_raw(item_name: str) -> list:
 
 # ── Claude matching ───────────────────────────────────────────────────────────
 
+# Words that indicate a prepared dish / different product type. If a candidate
+# contains one of these and the shopper's item does NOT, it's almost certainly
+# the wrong product (e.g. "frozen spinach" -> "Spinach & Ricotta Ravioli Meal").
+_DISH_WORDS = ("ravioli", "lasagne", "lasagna", "pizza", "meal", "soup", "sauce",
+               "pie", "quiche", "burger", "nugget", "schnitzel", "kiev", "dumpling",
+               "spring roll", "pasta bake", "risotto", "curry", "stir fry", "noodle box",
+               "chips", "crisps", "snack", "bar", "biscuit", "cookie", "cake", "muffin",
+               "juice", "drink", "smoothie", "yoghurt", "dip", "spread", "seasoning",
+               "stock", "gravy", "marinade", "dressing", "flavoured", "flavour")
+
+
+def _heuristic_filter(item_name: str, candidates: list) -> list:
+    """
+    Non-AI fallback filter used when the Claude matching call fails.
+    Rejects candidates that look like prepared dishes / derivative products
+    unless those words appear in the shopper's own item name.
+    """
+    item_lower = (item_name or "").lower()
+    filtered = []
+    for c in candidates:
+        cname = (c.get("name") or "").lower()
+        rejected = False
+        for w in _DISH_WORDS:
+            if w in cname and w not in item_lower:
+                rejected = True
+                break
+        if not rejected and sanity_check(c["price"], item_name)[0]:
+            filtered.append(c)
+    return filtered
+
+
 def pick_valid_matches(item_name: str, item_details: str, candidates: list, store: str) -> list:
     """
     Use Claude to identify ALL candidates that are a genuine match for the item.
@@ -362,17 +464,16 @@ def pick_valid_matches(item_name: str, item_details: str, candidates: list, stor
     """
     if not candidates:
         return []
-    # Single candidate — accept if it passes sanity check
+    # Single candidate — still apply the heuristic filter + sanity check
     if len(candidates) == 1:
-        ok, _ = sanity_check(candidates[0]["price"], item_name)
-        return [candidates[0]] if ok else []
+        return _heuristic_filter(item_name, candidates)
 
     try:
         import requests as http_req
         api_key = os.environ.get("ANTHROPIC_API_KEY", "")
         if not api_key:
-            # No Claude — accept all that pass sanity check
-            return [c for c in candidates if sanity_check(c["price"], item_name)[0]]
+            # No Claude — heuristic filter (rejects prepared dishes etc.)
+            return _heuristic_filter(item_name, candidates)
 
         prompt = f"""You are matching a shopping-list item to supermarket products. Be strict.
 
@@ -411,12 +512,14 @@ Reply with ONLY a JSON object listing every matching index:
                     c = candidates[idx]
                     if sanity_check(c["price"], item_name)[0]:
                         valid.append(c)
-            return valid
+            # Defence in depth: even Claude-accepted matches must pass the
+            # prepared-dish heuristic (catches occasional misjudgements).
+            return _heuristic_filter(item_name, valid) if valid else []
     except Exception as e:
         print(f"Claude matching error: {e}")
 
-    # Fallback — accept all passing sanity check
-    return [c for c in candidates if sanity_check(c["price"], item_name)[0]]
+    # Fallback — heuristic filter (rejects prepared dishes / derivatives)
+    return _heuristic_filter(item_name, candidates)
 
 
 def _best_by_total_cost(matches: list, required_qty: float, required_unit: str):
@@ -519,24 +622,27 @@ def search_all_stores(item: dict, settings: dict = None) -> dict:
 
     result = {"item": item_name, "woolworths": None, "coles": None, "aldi": None, "error": None}
 
+    # Build a focused search query from name + meaningful details
+    search_query = build_search_query(item_name, item_details)
+
     if include["woolworths"]:
-        cands = search_woolworths_raw(item_name, woolworths_store_id)
+        cands = search_woolworths_raw(search_query, woolworths_store_id)
         result["woolworths"] = _resolve_store(item_name, item_details, required_qty, required_unit, cands, "woolworths")
         time.sleep(0.3)
 
     if include["coles"]:
-        cands = search_coles_raw(item_name)
+        cands = search_coles_raw(search_query)
         result["coles"] = _resolve_store(item_name, item_details, required_qty, required_unit, cands, "coles")
         time.sleep(0.3)
 
     if include["aldi"]:
-        cands = search_aldi_raw(item_name)
+        cands = search_aldi_raw(search_query)
         result["aldi"] = _resolve_store(item_name, item_details, required_qty, required_unit, cands, "aldi")
         time.sleep(0.3)
 
-    # Fallback to price history if no live result found
+    # Fallback to price history if no live result found (included stores only)
     for store in ["woolworths", "coles", "aldi"]:
-        if result[store] is None:
+        if result[store] is None and include.get(store, True):
             last = get_last_price(item_name, store)
             if last:
                 pack = calc_packs_needed(required_qty, required_unit, last.get("product_name", item_name))
