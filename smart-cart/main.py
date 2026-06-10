@@ -96,10 +96,19 @@ def update_item(item_id):
     for i, item in enumerate(data["items"]):
         if item["id"] == item_id:
             updates = request.json
+            original_name = item.get("item", "")
+            # If the user manually edits qty on a recipe-linked item, store the
+            # difference as manual_qty so the edit survives future recomputes.
+            if "qty" in updates and item.get("recipe_quantities"):
+                try:
+                    contributions = sum(float(v) for v in item["recipe_quantities"].values())
+                    updates["manual_qty"] = max(0, round(float(updates["qty"]) - contributions, 2))
+                except (TypeError, ValueError):
+                    pass
             data["items"][i] = {**item, **updates}
             # Two-way sync: if item or details changed, update linked recipe ingredients
             if "item" in updates or "details" in updates:
-                _sync_item_to_recipes(data["items"][i])
+                _sync_item_to_recipes(data["items"][i], original_name)
             save_json("list.json", data)
             return jsonify(data["items"][i])
     return jsonify({"error": "Not found"}), 404
@@ -121,19 +130,22 @@ def toggle_item(item_id):
             return jsonify(item)
     return jsonify({"error": "Not found"}), 404
 
-def _sync_item_to_recipes(list_item):
+def _sync_item_to_recipes(list_item, original_name=""):
     """Sync list item name/details changes back to linked recipe ingredients."""
     recipe_tags = list_item.get("recipe_tags", [])
     if not recipe_tags:
         return
     recipes_data = load_json("recipes.json")
     changed = False
+    new_name = list_item.get("item", "").lower()
+    old_name = (original_name or "").lower()
     for recipe in recipes_data.get("recipes", []):
         if recipe["id"] not in recipe_tags:
             continue
         for ing in recipe.get("ingredients", []):
-            if ing.get("item", "").lower() == list_item.get("item", "").lower() or \
-               ing.get("item", "").lower() == list_item.get("_original_name", "").lower():
+            ing_name = ing.get("item", "").lower()
+            # Match by current name OR the pre-rename name
+            if ing_name == new_name or (old_name and ing_name == old_name):
                 if "item" in list_item:
                     ing["item"] = list_item["item"]
                 if "details" in list_item:
@@ -172,7 +184,10 @@ def add_recipe():
 
     if source_type == "url":
         from claude_helper import extract_recipe_from_url
-        extracted = extract_recipe_from_url(payload["url"])
+        url = (payload.get("url") or "").strip()
+        if not url:
+            return jsonify({"error": "No URL provided"}), 400
+        extracted = extract_recipe_from_url(url)
         if "error" in extracted:
             return jsonify({"error": extracted["error"]}), 500
         recipe.update({
@@ -188,6 +203,8 @@ def add_recipe():
         import base64
         from claude_helper import extract_recipe_from_image
         image_data = payload.get("image_data")
+        if not image_data:
+            return jsonify({"error": "No image provided"}), 400
         media_type = payload.get("media_type", "image/jpeg")
         extracted = extract_recipe_from_image(image_data, media_type)
         if "error" in extracted:
@@ -258,7 +275,14 @@ def delete_recipe(recipe_id):
     for item in list_data["items"]:
         if recipe_id in item.get("recipe_tags", []):
             item["recipe_tags"].remove(recipe_id)
-            if not item["recipe_tags"] and item.get("sources") == ["recipe"]:
+            # Remove this recipe's quantity contribution and recompute
+            if "recipe_quantities" in item:
+                item["recipe_quantities"].pop(recipe_id, None)
+            remaining = item.get("recipe_tags", [])
+            has_manual = "manual" in item.get("sources", []) or (item.get("manual_qty") or 0) > 0
+            if remaining or has_manual:
+                item["qty"] = _recompute_qty(item)
+            else:
                 item["included"] = False
     save_json("list.json", list_data)
     data["recipes"] = [rec for rec in data["recipes"] if rec["id"] != recipe_id]
@@ -291,6 +315,11 @@ def toggle_recipe(recipe_id):
                              and (item.get("unit") or "").lower().strip() == ing_unit), None)
 
             if existing:
+                # FIRST recipe contribution to a pre-existing manual item:
+                # capture its current qty as the manual base so it isn't wiped.
+                if not existing.get("recipe_quantities") and "manual" in existing.get("sources", []) \
+                        and not existing.get("manual_qty"):
+                    existing["manual_qty"] = float(existing.get("qty", 0) or 0)
                 # Record this recipe's contribution, then recompute qty as sum of all contributions
                 existing.setdefault("recipe_quantities", {})
                 existing["recipe_quantities"][recipe_id] = scaled
@@ -326,7 +355,7 @@ def toggle_recipe(recipe_id):
             if "recipe_quantities" in item:
                 item["recipe_quantities"].pop(recipe_id, None)
             remaining_recipes = item.get("recipe_tags", [])
-            has_manual = "manual" in item.get("sources", []) or item.get("manual_qty", 0) > 0
+            has_manual = "manual" in item.get("sources", []) or (item.get("manual_qty") or 0) > 0
             if remaining_recipes or has_manual:
                 # Still needed by another recipe or manually — keep ticked, reduce qty
                 item["qty"] = _recompute_qty(item)
@@ -542,18 +571,24 @@ def get_prices():
             manual_needed.append({"id": item.get("id"), "item": item["item"]})
             continue
 
-        # Ambiguity detection: if any store returned multiple genuine alternatives
-        # that differ meaningfully in product/price, surface for user confirmation.
+        # Ambiguity detection: only surface a clarification when the matched
+        # products are GENUINELY different (not just pack-size/brand variants).
         all_alts = []
         for store in ["woolworths", "coles", "aldi"]:
             sd = prices.get(store)
-            if sd and sd.get("alternatives") and len(sd["alternatives"]) > 1:
+            if sd and sd.get("alternatives"):
                 for alt in sd["alternatives"]:
                     all_alts.append({**alt, "store": store})
-        if len(all_alts) > 1:
-            # De-dup by product name; only clarify if >1 distinct product
-            distinct = {a["name"]: a for a in all_alts}
-            if len(distinct) > 1:
+
+        # De-dup by product name
+        distinct = {}
+        for a in all_alts:
+            if a["name"] not in distinct:
+                distinct[a["name"]] = a
+
+        if len(distinct) > 1:
+            from claude_helper import assess_ambiguity
+            if assess_ambiguity(item.get("item", ""), item.get("details", ""), list(distinct.values())):
                 clarifications.append({
                     "item_id": item.get("id"),
                     "item_name": item.get("item"),
@@ -689,8 +724,15 @@ def complete_shop():
     settings = load_json("settings.json")
     history = load_json("history.json")
     today = datetime.now().isoformat()
-    cheapest_single = payload.get("cheapest_single_store", option.get("total", 0))
-    saved = round(max(cheapest_single - option.get("total", 0), 0), 2)
+    option_total = float(option.get("total", 0) or 0)
+    raw_cheapest = payload.get("cheapest_single_store")
+    try:
+        cheapest_single = float(raw_cheapest)
+        if not (cheapest_single == cheapest_single and abs(cheapest_single) != float("inf")):  # NaN/Inf guard
+            cheapest_single = option_total
+    except (TypeError, ValueError):
+        cheapest_single = option_total
+    saved = round(max(cheapest_single - option_total, 0), 2)
     rewards_saved = round(option.get("subtotal", 0) * 0.1, 2) if option.get("rewards_plus_applied") else 0
     shop_record = {
         "id": str(uuid.uuid4()), "date": today,
@@ -734,7 +776,7 @@ def export_excel():
     list_data = load_json("list.json")
     recipes_data = load_json("recipes.json")
     history_data = load_json("history.json")
-    store_lists = request.json.get("store_lists") if request.json else None
+    store_lists = (request.get_json(silent=True) or {}).get("store_lists")
     xlsx_bytes = _export(list_data, recipes_data, history_data, store_lists)
     return Response(
         xlsx_bytes,
@@ -774,6 +816,6 @@ def get_price_history():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"\n🛒 Smart Cart v1.1.0 running on port {port}")
+    print(f"\n🛒 Smart Cart v1.4.1 running on port {port}")
     print(f"   Ingress path: '{INGRESS_PATH}'")
     app.run(host="0.0.0.0", port=port, debug=False)
