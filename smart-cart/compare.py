@@ -1,7 +1,7 @@
 """
 compare.py — Basket comparison logic for Smart Cart v1.1.0
 """
-from claude_helper import convert_units, units_compatible
+from claude_helper import convert_units
 
 
 def format_price(price: float) -> str:
@@ -19,8 +19,21 @@ def apply_rewards_plus(price: float, active: bool) -> float:
 
 def consolidate_items(items: list) -> list:
     """
-    Merge duplicate items. If units are incompatible, create separate entries.
+    Merge duplicate items per the agreed spec:
+    - identical units merge directly
+    - purchase-scale conversions merge (g<->kg, ml<->l)
+    - cooking measures (tsp/tbsp/cup) vs purchase units -> SEPARATE entry,
+      so '3 L milk' + '2 tbsp milk' stays two lines, not '3.03 L'.
     """
+    WEIGHT_SCALE = {"g", "kg"}
+    VOLUME_SCALE = {"ml", "l", "litre"}
+
+    def can_merge(u1: str, u2: str) -> bool:
+        if u1 == u2:
+            return True
+        return (u1 in WEIGHT_SCALE and u2 in WEIGHT_SCALE) or \
+               (u1 in VOLUME_SCALE and u2 in VOLUME_SCALE)
+
     consolidated = {}
 
     for item in items:
@@ -40,23 +53,25 @@ def consolidate_items(items: list) -> list:
             existing = consolidated[key]
             existing_unit = (existing.get("unit") or "").lower().strip()
 
-            if units_compatible(existing_unit, unit):
-                # Convert and merge
-                if existing_unit and unit and existing_unit != unit:
+            def _merge_alt(alt_key, item, qty, unit):
+                """Merge into an existing alt entry rather than overwrite/drop."""
+                if alt_key in consolidated:
+                    consolidated[alt_key]["qty"] = round(consolidated[alt_key]["qty"] + qty, 3)
+                else:
+                    consolidated[alt_key] = {**item, "qty": qty, "unit": unit}
+
+            if can_merge(existing_unit, unit):
+                if existing_unit != unit:
                     try:
                         converted = convert_units(qty, unit, existing_unit)
                         existing["qty"] = round(existing["qty"] + converted, 3)
                     except Exception:
-                        # Can't convert — create separate entry
-                        alt_key = f"{key}__{unit}"
-                        consolidated[alt_key] = {**item, "qty": qty, "unit": unit}
+                        _merge_alt(f"{key}__{unit}", item, qty, unit)
                 else:
                     existing["qty"] = round(existing["qty"] + qty, 3)
             else:
-                # Incompatible units — separate entry
-                alt_key = f"{key}__{unit}"
-                if alt_key not in consolidated:
-                    consolidated[alt_key] = {**item, "qty": qty, "unit": unit}
+                # Different scale or incompatible — separate entry (merging if exists)
+                _merge_alt(f"{key}__{unit}", item, qty, unit)
 
             # Merge tags and sources
             for tag in item.get("recipe_tags", []):
