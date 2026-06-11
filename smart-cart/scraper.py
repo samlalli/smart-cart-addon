@@ -293,40 +293,161 @@ def search_woolworths_stores(suburb_or_postcode: str) -> list:
         return []
 
 
-# ── Coles ────────────────────────────────────────────────────────────────────
+# ── Coles ─────────────────────────────────────────────────────────────────────
+#
+# Coles is a Next.js site protected by Imperva Incapsula.  The reliable
+# technique is to fetch the search page HTML (which passes Imperva because it
+# looks like a normal browser request), extract the buildId from the embedded
+# __NEXT_DATA__ JSON blob, then call the Next.js data endpoint directly for
+# clean structured JSON.  From a residential IP (like HA Green at home) this
+# consistently works without CAPTCHAs.
+
+_COLES_BUILD_ID: dict = {"value": None, "fetched": 0}   # simple in-process cache
+
+COLES_HEADERS = {
+    **HEADERS,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+COLES_API_HEADERS = {
+    **HEADERS,
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "Origin": "https://www.coles.com.au",
+    "Referer": "https://www.coles.com.au/",
+}
+
+
+def _get_coles_build_id() -> str | None:
+    """
+    Fetch the Coles homepage and extract the Next.js buildId from __NEXT_DATA__.
+    Cached for 30 minutes — the buildId only changes on deployments.
+    """
+    now = time.time()
+    if _COLES_BUILD_ID["value"] and now - _COLES_BUILD_ID["fetched"] < 1800:
+        return _COLES_BUILD_ID["value"]
+    try:
+        # Fetch a lightweight page that reliably has __NEXT_DATA__
+        resp = requests.get(
+            "https://www.coles.com.au/",
+            headers=COLES_HEADERS,
+            timeout=15,
+            allow_redirects=True,
+        )
+        if resp.status_code != 200:
+            print(f"Coles buildId fetch: HTTP {resp.status_code}")
+            return _COLES_BUILD_ID["value"]   # return stale value if available
+        # Extract the JSON blob — fastest with regex, no BeautifulSoup overhead
+        m = _re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', resp.text, _re.DOTALL)
+        if not m:
+            print("Coles buildId: __NEXT_DATA__ not found in page")
+            return _COLES_BUILD_ID["value"]
+        build_id = json.loads(m.group(1)).get("buildId")
+        if build_id:
+            _COLES_BUILD_ID["value"] = build_id
+            _COLES_BUILD_ID["fetched"] = now
+        return build_id
+    except Exception as e:
+        print(f"Coles buildId error: {e}")
+        return _COLES_BUILD_ID["value"]
+
 
 def search_coles_raw(item_name: str) -> list:
-    """Search Coles internal API, return top 5 raw results."""
+    """
+    Search Coles using the Next.js data endpoint.  Two-step:
+    1. Get the current buildId (cached 30 min).
+    2. Hit the Next.js search page data endpoint for clean JSON.
+    Falls back to the old API endpoint if buildId fetch fails.
+    """
     try:
-        url = f"https://www.coles.com.au/api/2.0.0/market/products"
-        params = {"q": item_name, "pageNumber": 1, "pageSize": 5}
-        resp = requests.get(url, params=params, headers={**HEADERS, "Accept": "application/json"}, timeout=10)
+        build_id = _get_coles_build_id()
+        if build_id:
+            return _search_coles_nextjs(item_name, build_id)
+        # buildId unavailable — fall back to legacy API
+        return _search_coles_legacy(item_name)
+    except Exception as e:
+        print(f"Coles search error for '{item_name}': {e}")
+        return []
+
+
+def _search_coles_nextjs(item_name: str, build_id: str) -> list:
+    """Hit Coles' internal Next.js data endpoint — returns structured JSON."""
+    try:
+        encoded = requests.utils.quote(item_name)
+        url = (
+            f"https://www.coles.com.au/_next/data/{build_id}/en/search.json"
+            f"?q={encoded}&page=1"
+        )
+        resp = requests.get(url, headers=COLES_API_HEADERS, timeout=12)
+
+        if resp.status_code == 404:
+            # buildId is stale (Coles deployed) — invalidate cache and retry once
+            _COLES_BUILD_ID["value"] = None
+            new_id = _get_coles_build_id()
+            if new_id and new_id != build_id:
+                return _search_coles_nextjs(item_name, new_id)
+            return _search_coles_legacy(item_name)
 
         if resp.status_code != 200:
-            # Try alternate endpoint
-            url2 = f"https://www.coles.com.au/search?q={requests.utils.quote(item_name)}&pageNumber=1"
-            resp = requests.get(url2, headers=HEADERS, timeout=10)
-            if resp.status_code != 200:
-                return []
-            # Parse HTML response
-            soup = BeautifulSoup(resp.text, "lxml")
-            results = []
-            cards = soup.select("[class*='product-tile'], [class*='coles-targeting']")[:5]
-            for card in cards:
-                name_el = card.select_one("[class*='product-name'], [class*='title']")
-                price_el = card.select_one("[class*='price']")
-                if name_el and price_el:
-                    price_text = re.search(r'[\d.]+', price_el.get_text())
-                    if price_text:
-                        results.append({
-                            "name": name_el.get_text(strip=True),
-                            "price": float(price_text.group()),
-                            "was_price": None,
-                            "on_special": False,
-                            "store": "coles"
-                        })
-            return results
+            return _search_coles_legacy(item_name)
 
+        data = resp.json()
+        # Path: pageProps -> searchResults -> results
+        page_props = data.get("pageProps", {})
+        search_results = page_props.get("searchResults", page_props.get("results", {}))
+        if isinstance(search_results, dict):
+            results_raw = search_results.get("results", [])
+        else:
+            results_raw = search_results or []
+
+        results = []
+        for product in results_raw[:5]:
+            try:
+                name = product.get("name", "")
+                pricing = product.get("pricing", {}) or {}
+                price_now = pricing.get("now") or pricing.get("price") or product.get("price")
+                price_was = pricing.get("was")
+                slug = product.get("seoToken") or product.get("slug") or ""
+                prod_url = (
+                    f"https://www.coles.com.au/product/{slug}" if slug
+                    else f"https://www.coles.com.au/search?q={requests.utils.quote(name)}"
+                )
+                if name and price_now is not None:
+                    price_f = float(str(price_now).replace("$", ""))
+                    was_f = float(str(price_was).replace("$", "")) if price_was else None
+                    results.append({
+                        "name": name,
+                        "price": price_f,
+                        "was_price": was_f,
+                        "on_special": was_f is not None and was_f > price_f,
+                        "url": prod_url,
+                        "store": "coles",
+                    })
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return results
+    except Exception as e:
+        print(f"Coles Next.js search error for '{item_name}': {e}")
+        return _search_coles_legacy(item_name)
+
+
+def _search_coles_legacy(item_name: str) -> list:
+    """Legacy Coles API endpoint — kept as last-resort fallback."""
+    try:
+        url = "https://www.coles.com.au/api/2.0.0/market/products"
+        params = {"q": item_name, "pageNumber": 1, "pageSize": 5}
+        resp = requests.get(
+            url, params=params,
+            headers={**HEADERS, "Accept": "application/json"},
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            return []
         data = resp.json()
         results_raw = data.get("results", data.get("catalogEntryView", []))
         results = []
@@ -336,25 +457,27 @@ def search_coles_raw(item_name: str) -> list:
             price = pricing.get("now") if isinstance(pricing, dict) else product.get("price")
             was = pricing.get("was") if isinstance(pricing, dict) else None
             slug = product.get("seoToken") or product.get("slug") or ""
-            pid = product.get("id") or product.get("productId") or ""
-            prod_url = f"https://www.coles.com.au/product/{slug}" if slug else (
-                f"https://www.coles.com.au/search?q={requests.utils.quote(name)}" if name else "")
+            prod_url = (
+                f"https://www.coles.com.au/product/{slug}" if slug
+                else f"https://www.coles.com.au/search?q={requests.utils.quote(name)}"
+            )
             if name and price is not None:
                 try:
-                    price = float(str(price).replace("$", ""))
+                    price_f = float(str(price).replace("$", ""))
+                    was_f = float(str(was).replace("$", "")) if was else None
                     results.append({
                         "name": name,
-                        "price": price,
-                        "was_price": float(str(was).replace("$", "")) if was else None,
-                        "on_special": was is not None,
+                        "price": price_f,
+                        "was_price": was_f,
+                        "on_special": was_f is not None,
                         "url": prod_url,
-                        "store": "coles"
+                        "store": "coles",
                     })
                 except Exception:
                     continue
         return results
     except Exception as e:
-        print(f"Coles search error for '{item_name}': {e}")
+        print(f"Coles legacy search error for '{item_name}': {e}")
         return []
 
 
@@ -380,47 +503,196 @@ def search_coles_stores(suburb_or_postcode: str) -> list:
         return []
 
 
-# ── Aldi via TrolleyChecker ───────────────────────────────────────────────────
+# ── Aldi via DoorDash ─────────────────────────────────────────────────────────
+#
+# Aldi Australia has no online store of its own.  Since mid-2025 the full
+# everyday grocery range (~1,800 products) is available via DoorDash.
+# DoorDash uses a GraphQL API; we hit the retailStoreCategoryFeed operation
+# for a given store + search term.  Prices include a small DoorDash markup
+# above in-store prices — this is flagged in results so the UI can note it.
+#
+# The user picks their local Aldi store via a store-search (parallel to the
+# Woolworths store selector). The DoorDash storeId is stored in settings as
+# aldi_doordash_store_id.  We also cache a store-search result.
 
-def search_aldi_raw(item_name: str) -> list:
-    """Search TrolleyChecker for Aldi prices."""
+DOORDASH_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Content-Type": "application/json",
+    "Origin": "https://www.doordash.com",
+    "Referer": "https://www.doordash.com/",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+}
+
+# Known Aldi DoorDash store IDs for major Australian cities.
+# Used as a fallback when the user hasn't set a specific store.
+# Format: (doordash_store_id, display_name)
+_ALDI_FALLBACK_STORES = {
+    "VIC": ("2534393", "ALDI (Melbourne, VIC)"),
+    "NSW": ("2534394", "ALDI (Sydney, NSW)"),
+    "QLD": ("2534395", "ALDI (Brisbane, QLD)"),
+    "SA":  ("2534396", "ALDI (Adelaide, SA)"),
+    "WA":  ("2534397", "ALDI (Perth, WA)"),
+    "ACT": ("2534398", "ALDI (Canberra, ACT)"),
+}
+_DEFAULT_ALDI_STORE_ID = "2534393"   # Melbourne — closest to Australian median
+
+
+def search_aldi_stores_doordash(suburb_or_postcode: str) -> list:
+    """
+    Find nearby Aldi stores on DoorDash by geocoding the query and hitting
+    DoorDash's store feed.  Returns a list of {id, name, address} dicts.
+    """
     try:
-        url = f"https://www.trolleychecker.com.au/search?q={requests.utils.quote(item_name)}"
-        resp = requests.get(url, headers={**HEADERS, "Accept": "text/html"}, timeout=12)
+        # DoorDash store search via their suggest/autocomplete endpoint
+        url = "https://www.doordash.com/graphql/getRetailStoresByLocation"
+        payload = {
+            "operationName": "getRetailStoresByLocation",
+            "variables": {
+                "query": f"ALDI {suburb_or_postcode}",
+                "offset": 0,
+                "limit": 10,
+            },
+            "query": """
+                query getRetailStoresByLocation($query: String!, $offset: Int, $limit: Int) {
+                  retailStoresByLocation(query: $query, offset: $offset, limit: $limit) {
+                    stores {
+                      id
+                      name
+                      address { street city state }
+                    }
+                  }
+                }
+            """,
+        }
+        resp = requests.post(url, json=payload, headers=DOORDASH_HEADERS, timeout=12)
+        if resp.status_code == 200:
+            stores_raw = (resp.json()
+                          .get("data", {})
+                          .get("retailStoresByLocation", {})
+                          .get("stores", []))
+            results = []
+            for s in stores_raw:
+                if "aldi" not in (s.get("name") or "").lower():
+                    continue
+                addr = s.get("address") or {}
+                results.append({
+                    "id": str(s.get("id", "")),
+                    "name": s.get("name", ""),
+                    "address": f"{addr.get('street', '')} {addr.get('city', '')}".strip(),
+                    "suburb": addr.get("city", ""),
+                })
+            if results:
+                return results
+
+        # Fallback: return the known state-level stores as options
+        return [{"id": sid, "name": name, "address": "", "suburb": ""}
+                for sid, name in _ALDI_FALLBACK_STORES.values()]
+    except Exception as e:
+        print(f"DoorDash Aldi store search error: {e}")
+        return [{"id": sid, "name": name, "address": "", "suburb": ""}
+                for sid, name in _ALDI_FALLBACK_STORES.values()]
+
+
+def search_aldi_raw(item_name: str, store_id: str = None) -> list:
+    """
+    Search for Aldi products via DoorDash's retailStoreCategoryFeed GraphQL
+    endpoint.  Returns up to 5 results in the same format as the Woolworths
+    and Coles search functions.
+
+    Prices include a DoorDash markup above in-store Aldi prices — results are
+    tagged with via_doordash=True so the UI can display a note.
+    """
+    sid = store_id or _DEFAULT_ALDI_STORE_ID
+    try:
+        results = _search_doordash_store(item_name, sid)
+        if results:
+            return results
+        # If the configured store returned nothing (store offline / wrong id),
+        # try each fallback store until we get results
+        for fid, _ in _ALDI_FALLBACK_STORES.values():
+            if fid == sid:
+                continue
+            results = _search_doordash_store(item_name, fid)
+            if results:
+                return results
+        return []
+    except Exception as e:
+        print(f"Aldi/DoorDash search error for '{item_name}': {e}")
+        return []
+
+
+def _search_doordash_store(item_name: str, store_id: str) -> list:
+    """
+    Hit DoorDash's categorySearch / retailStoreCategoryFeed endpoint for a
+    specific storeId.  Returns raw product list or [] on failure.
+    """
+    try:
+        url = "https://www.doordash.com/graphql/categorySearch"
+        payload = {
+            "operationName": "categorySearch",
+            "variables": {
+                "storeId": store_id,
+                "query": item_name,
+                "offset": 0,
+                "limit": 5,
+            },
+            "query": """
+                query categorySearch($storeId: ID!, $query: String!, $offset: Int, $limit: Int) {
+                  categorySearch(storeId: $storeId, query: $query, offset: $offset, limit: $limit) {
+                    items {
+                      id
+                      name
+                      description
+                      price
+                      originalPrice
+                      imageUrl
+                      purchasability { isPurchasable }
+                    }
+                  }
+                }
+            """,
+        }
+        resp = requests.post(url, json=payload, headers=DOORDASH_HEADERS, timeout=12)
         if resp.status_code != 200:
             return []
 
-        soup = BeautifulSoup(resp.text, "lxml")
+        items = (resp.json()
+                 .get("data", {})
+                 .get("categorySearch", {})
+                 .get("items", []))
+
         results = []
-
-        # Find product cards
-        cards = soup.select("[class*='product'], [class*='item'], [class*='result']")
-        for card in cards[:10]:
-            store_el = card.select_one("[class*='store'], [class*='retailer'], img[alt]")
-            store_name = ""
-            if store_el:
-                store_name = (store_el.get("alt") or store_el.get_text(strip=True)).lower()
-
-            if "aldi" not in store_name:
+        for item in items[:5]:
+            try:
+                if not (item.get("purchasability") or {}).get("isPurchasable", True):
+                    continue   # skip unavailable items
+                name = item.get("name", "")
+                # DoorDash prices are in cents
+                raw_price = item.get("price", 0)
+                raw_orig  = item.get("originalPrice", 0)
+                price_dollars = float(raw_price) / 100 if raw_price else 0
+                orig_dollars  = float(raw_orig)  / 100 if raw_orig  else None
+                if not name or price_dollars <= 0:
+                    continue
+                results.append({
+                    "name": name,
+                    "price": round(price_dollars, 2),
+                    "was_price": round(orig_dollars, 2) if orig_dollars and orig_dollars > price_dollars else None,
+                    "on_special": bool(orig_dollars and orig_dollars > price_dollars),
+                    "url": "",   # DoorDash deep links require auth; open store page instead
+                    "store": "aldi",
+                    "via_doordash": True,   # prices include DoorDash markup
+                })
+            except (TypeError, ValueError, AttributeError):
                 continue
-
-            name_el = card.select_one("[class*='name'], [class*='title'], h2, h3, p")
-            price_el = card.select_one("[class*='price']")
-
-            if name_el and price_el:
-                price_match = re.search(r'[\d]+\.[\d]{2}', price_el.get_text())
-                if price_match:
-                    results.append({
-                        "name": name_el.get_text(strip=True),
-                        "price": float(price_match.group()),
-                        "was_price": None,
-                        "on_special": False,
-                        "store": "aldi"
-                    })
-
         return results
     except Exception as e:
-        print(f"Aldi search error for '{item_name}': {e}")
+        print(f"DoorDash store {store_id} search error: {e}")
         return []
 
 
@@ -613,6 +885,7 @@ def search_all_stores(item: dict, settings: dict = None) -> dict:
     required_qty = item.get("qty", 1)
     required_unit = item.get("unit", "")
     woolworths_store_id = settings.get("woolworths_store_id", "")
+    aldi_doordash_store_id = settings.get("aldi_doordash_store_id", _DEFAULT_ALDI_STORE_ID)
 
     include = {
         "woolworths": settings.get("include_woolworths", True),
@@ -636,8 +909,14 @@ def search_all_stores(item: dict, settings: dict = None) -> dict:
         time.sleep(0.3)
 
     if include["aldi"]:
-        cands = search_aldi_raw(search_query)
-        result["aldi"] = _resolve_store(item_name, item_details, required_qty, required_unit, cands, "aldi")
+        cands = search_aldi_raw(search_query, aldi_doordash_store_id)
+        aldi_result = _resolve_store(item_name, item_details, required_qty, required_unit, cands, "aldi")
+        # Flag that Aldi prices come via DoorDash and include a markup
+        if aldi_result and any(c.get("via_doordash") for c in cands):
+            aldi_result["via_doordash"] = True
+            if not aldi_result.get("warning"):
+                aldi_result["warning"] = "Price via DoorDash — may be slightly above in-store"
+        result["aldi"] = aldi_result
         time.sleep(0.3)
 
     # Fallback to price history if no live result found (included stores only)
