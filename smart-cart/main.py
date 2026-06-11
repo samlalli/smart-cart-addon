@@ -465,6 +465,14 @@ def search_coles_stores():
         return jsonify([])
     return jsonify(_search(q))
 
+@r("/api/stores/aldi", methods=["GET"])
+def search_aldi_stores():
+    from scraper import search_aldi_stores_doordash as _search
+    q = request.args.get("q", "")
+    if not q:
+        return jsonify([])
+    return jsonify(_search(q))
+
 
 # ── Analytics ──────────────────────────────────────────────────────────────────
 
