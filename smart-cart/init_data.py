@@ -27,6 +27,8 @@ DEFAULTS = {
         "coles_store_id": "",
         "coles_store_name": "",
         "aldi_store_name": "",
+        "aldi_doordash_store_id": "",
+        "aldi_doordash_store_name": "",
         "theme": "dark",
         "font_size": "medium",
         "categories": [
