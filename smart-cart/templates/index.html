@@ -351,8 +351,13 @@ tr:hover .row-actions{opacity:1}
           <div id="s-cs-selected" style="font-size:12px;color:var(--accent);margin-top:4px"></div>
         </div>
         <div class="form-field">
-          <label>Aldi Store (your local)</label>
-          <input type="text" id="s-as" placeholder="e.g. Newtown" onchange="saveSetting('aldi_store_name',this.value)">
+          <label>Aldi Store (via DoorDash)</label>
+          <div style="display:flex;gap:5px">
+            <input type="text" id="s-as-search" placeholder="Suburb or postcode…" style="flex:1" oninput="searchStores('aldi',this.value)">
+          </div>
+          <div id="s-as-results" style="display:none;margin-top:5px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rs);max-height:120px;overflow-y:auto"></div>
+          <div id="s-as-selected" style="font-size:12px;color:var(--accent);margin-top:4px"></div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:3px">Prices sourced from DoorDash — may be slightly above in-store</div>
         </div>
         <div class="form-field">
           <label>Preferred Delivery Window</label>
@@ -1503,7 +1508,7 @@ function applySettings(){
   sc('s-er',s.everyday_rewards);sc('s-fb',s.flybuys);sc('s-wd',s.woolworths_delivery_sub);sc('s-cp',s.coles_plus);sc('s-rp',s.rewards_plus_active);
   if(s.rewards_plus_code)document.getElementById('s-rp-code').value=s.rewards_plus_code;
   if(s.preferred_delivery_window)document.getElementById('s-dw').value=s.preferred_delivery_window;
-  if(s.aldi_store_name)document.getElementById('s-as').value=s.aldi_store_name;
+  if(s.aldi_doordash_store_name)document.getElementById('s-as-selected').textContent='✓ '+s.aldi_doordash_store_name;
   if(s.rewards_plus_last_used)document.getElementById('rp-last').textContent='Last used: '+new Date(s.rewards_plus_last_used).toLocaleDateString('en-AU');
   if(s.woolworths_store_name)document.getElementById('s-ws-selected').textContent='✓ '+s.woolworths_store_name;
   if(s.coles_store_name)document.getElementById('s-cs-selected').textContent='✓ '+s.coles_store_name;
@@ -1519,22 +1524,37 @@ async function searchStores(chain,query){
   clearTimeout(storeSearchTimer);
   if(query.length<3)return;
   storeSearchTimer=setTimeout(async()=>{
-    const r=await fetch(BASE+`api/stores/${chain}?q=${encodeURIComponent(query)}`);
-    const stores=await r.json();
-    const resEl=document.getElementById(`s-${chain[0]}s-results`);
-    if(!stores.length){resEl.style.display='none';return}
-    resEl.style.display='block';
-    resEl.innerHTML=stores.map(s=>`<div onclick="selectStore('${chain}','${esc(s.id)}','${esc(s.name)}')" style="padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)">${esc(s.name)}<div style="font-size:11px;color:var(--text-muted)">${esc(s.address||s.suburb||'')}</div></div>`).join('');
+    try{
+      const r=await apiFetch(`api/stores/${chain}?q=${encodeURIComponent(query)}`);
+      const stores=Array.isArray(r)?r:[];
+      // Result element id: s-ws-results / s-cs-results / s-as-results
+      const prefix=chain==='aldi'?'s-as':chain==='woolworths'?'s-ws':'s-cs';
+      const resEl=document.getElementById(`${prefix}-results`);
+      if(!resEl)return;
+      if(!stores.length){resEl.style.display='none';return}
+      resEl.style.display='block';
+      resEl.innerHTML=stores.map(s=>`<div onclick="selectStore('${chain}','${esc(s.id)}','${esc(s.name)}')" style="padding:8px 10px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border)">${esc(s.name)}<div style="font-size:11px;color:var(--text-muted)">${esc(s.address||s.suburb||'')}</div></div>`).join('');
+    }catch(e){}
   },400);
 }
 
 async function selectStore(chain,id,name){
-  await saveSetting(`${chain}_store_id`,id);
-  await saveSetting(`${chain}_store_name`,name);
-  settingsData[`${chain}_store_id`]=id;
-  settingsData[`${chain}_store_name`]=name;
-  document.getElementById(`s-${chain[0]}s-results`).style.display='none';
-  document.getElementById(`s-${chain[0]}s-selected`).textContent='✓ '+name;
+  const prefix=chain==='aldi'?'s-as':chain==='woolworths'?'s-ws':'s-cs';
+  if(chain==='aldi'){
+    await saveSetting('aldi_doordash_store_id',id);
+    await saveSetting('aldi_doordash_store_name',name);
+    settingsData.aldi_doordash_store_id=id;
+    settingsData.aldi_doordash_store_name=name;
+  } else {
+    await saveSetting(`${chain}_store_id`,id);
+    await saveSetting(`${chain}_store_name`,name);
+    settingsData[`${chain}_store_id`]=id;
+    settingsData[`${chain}_store_name`]=name;
+  }
+  const resEl=document.getElementById(`${prefix}-results`);
+  if(resEl)resEl.style.display='none';
+  const selEl=document.getElementById(`${prefix}-selected`);
+  if(selEl)selEl.textContent='✓ '+name;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1784,6 +1804,7 @@ function renderBreakdown(opt){
         store,unitPrice,total,
         onSpecial:storeData.on_special,
         estimated:storeData.estimated,
+        via_doordash:storeData.via_doordash||false,
         warning:storeData.warning||'',
         priceChange,lastPrice
       });
@@ -1791,13 +1812,14 @@ function renderBreakdown(opt){
   }
   if(!allItems.length)return'<div style="color:var(--text-muted);font-size:12px">No items</div>';
   return allItems.map(item=>{
-    const warn=item.warning?`<span class="badge badge-warning" style="font-size:10px">⚠️</span>`:'';
+    const warn=item.warning&&!item.via_doordash?`<span class="badge badge-warning" style="font-size:10px">⚠️</span>`:'';
     const est=item.estimated?`<span class="badge badge-estimated" style="font-size:10px">est.</span>`:'';
+    const dd=item.via_doordash?`<span class="badge badge-aldi" style="font-size:10px">DoorDash</span>`:'';
     const special=item.onSpecial?`<span style="font-size:10px;color:var(--gold)">⭐ special</span>`:'';
     const hist=item.priceChange!=null?`<span style="color:${item.priceChange>0?'var(--danger)':'var(--accent)'}">  ${item.priceChange>0?'▲':'▼'}${formatPrice(Math.abs(item.priceChange))}</span>`:'';
     return `<div class="breakdown-item">
       <div class="bi-name">${esc(item.name)} <span style="color:var(--text-muted)">(${esc(item.buyQty)})</span></div>
-      <div class="bi-match">${esc(item.matchedName)} ${warn}${est}${special}</div>
+      <div class="bi-match">${esc(item.matchedName)} ${warn}${est}${dd}${special}</div>
       <div class="bi-price">${formatPrice(item.unitPrice)}/unit<br><strong>${formatPrice(item.total)}</strong>${hist}</div>
     </div>`;
   }).join('');
